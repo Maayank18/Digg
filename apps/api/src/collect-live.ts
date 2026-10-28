@@ -25,6 +25,7 @@ interface TavilyResponse {
 export interface SearchPlan {
   query: string;
   includeDomains?: string[];
+  excludeDomains?: string[];
   depth?: "basic" | "advanced";
   maxResults?: number;
   rawContent?: boolean;
@@ -62,6 +63,7 @@ export async function tavilySearch(plan: SearchPlan, signal?: AbortSignal): Prom
       include_answer: false,
       include_raw_content: plan.rawContent ? "text" : false,
       ...(plan.includeDomains ? { include_domains: plan.includeDomains } : {}),
+      ...(plan.excludeDomains ? { exclude_domains: plan.excludeDomains } : {}),
       ...(plan.chunks ? { chunks_per_source: 3 } : {}),
     }),
   });
@@ -300,8 +302,42 @@ export async function chatJson<T>(
 // substring of the text it claims to come from.
 // ---------------------------------------------------------------------------
 
-const EXEMPT_FROM_GROUNDING = new Set(["website", "last_verified", "source_url"]);
-const IDENTITY_PRIORITY = ["company_name", "event_name", "program_name", "product_name", "segment"];
+const EXEMPT_FROM_GROUNDING = new Set(["website", "last_verified", "source_url", "pdf_url"]);
+const IDENTITY_PRIORITY = ["company_name", "event_name", "paper_title", "person_name", "role_title", "program_name", "product_name", "segment"];
+
+const OFFICIAL_PAPER_DOMAINS = new Set([
+  "arxiv.org",
+  "openreview.net",
+  "semanticscholar.org",
+  "aclanthology.org",
+  "paperswithcode.com",
+  "ieee.org",
+  "acm.org",
+  "nature.com",
+  "science.org",
+  "sciencedirect.com",
+  "springer.com",
+  "cell.com",
+  "biorxiv.org",
+  "medrxiv.org",
+  "pnas.org",
+  "nih.gov",
+  "ncbi.nlm.nih.gov",
+  "researchgate.net",
+  "orcid.org",
+]);
+
+const OFFICIAL_EVENT_DOMAINS = new Set([
+  "devfolio.co",
+  "unstop.com",
+  "devpost.com",
+  "hackerearth.com",
+  "mlh.io",
+  "lu.ma",
+  "eventbrite.com",
+  "meetup.com",
+  "hackclub.com",
+]);
 
 function groundedFields(fields: Record<string, string>, content: string): { fields: Record<string, string>; fieldNames: string[] } {
   const haystack = content.toLowerCase();
@@ -327,11 +363,36 @@ function groundedFields(fields: Record<string, string>, content: string): { fiel
 }
 
 function authorityFor(url: string, fields: Record<string, string>): ProvenanceSource["authority"] {
-  const domain = domainOf(url);
-  const nameSlug = slug(fields.company_name || fields.vendor || fields.organization || "");
-  if (nameSlug && domain.replace(/\./g, "").includes(nameSlug.replace(/-/g, ""))) return "official";
-  if (/\.(gov|edu)$/.test(domain)) return "official";
-  if (/news|times|tribune|herald|express|economictimes|business-standard/.test(domain)) return "press";
+  const domain = domainOf(url).toLowerCase();
+  if ([...OFFICIAL_PAPER_DOMAINS].some((d) => domain === d || domain.endsWith(`.${d}`))) {
+    return "official";
+  }
+  if ([...OFFICIAL_EVENT_DOMAINS].some((d) => domain === d || domain.endsWith(`.${d}`))) {
+    return "official";
+  }
+  const entityCandidate =
+    fields.company_name ||
+    fields.organizer ||
+    fields.event_name ||
+    fields.paper_title ||
+    fields.person_name ||
+    fields.vendor ||
+    fields.organization ||
+    "";
+  const nameSlug = slug(entityCandidate);
+  if (nameSlug && nameSlug.length >= 3) {
+    const compactSlug = nameSlug.replace(/-/g, "");
+    const compactDomain = domain.replace(/\./g, "");
+    if (compactDomain.includes(compactSlug) || compactSlug.includes(compactDomain.split(".")[0] ?? "")) {
+      return "official";
+    }
+  }
+  if (/\.(gov|edu|ac\.in|ac\.uk|edu\.in|org\.in)$/i.test(domain)) {
+    return "official";
+  }
+  if (/news|times|tribune|herald|express|economictimes|business-standard|techcrunch|venturebeat|wired|reuters|bloomberg|forbes/.test(domain)) {
+    return "press";
+  }
   return "secondary";
 }
 
@@ -410,9 +471,9 @@ export function provenance(input: {
 const SPONSOR_DEADLINE_MS = 100_000;
 const MAX_ENRICH = env.sponsorEnrichLimit;
 const ENRICH_CONCURRENCY = 8;
-const BATCH_CHARS = 11_000;
-const MAX_CORPUS_CHARS = 66_000;
-const PAGE_WINDOW_CHARS = 2_800;
+const BATCH_CHARS = 16_000;
+const MAX_CORPUS_CHARS = 80_000;
+const PAGE_WINDOW_CHARS = 5_500;
 const CONTACT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const QUERY_NOISE =
@@ -429,21 +490,28 @@ function eventKindOf(query: string): string {
 }
 
 function sponsorSearchPlans(blueprint: CollectionBlueprint): SearchPlan[] {
-  const topic = topicOf(blueprint.query);
+  const topic = (blueprint.entities.subject || topicOf(blueprint.query)).trim();
+  const place = (blueprint.entities.location || "").trim();
   const kind = eventKindOf(blueprint.query);
   const t = topic ? `${topic} ` : "";
-  const common = { depth: "advanced" as const, maxResults: 20, rawContent: true };
+  const loc = place ? ` ${place}` : "";
+  const currentYear = new Date().getFullYear();
+  const prevYear = currentYear - 1;
+  const common = {
+    depth: "advanced" as const,
+    maxResults: 20,
+    rawContent: true,
+    excludeDomains: ["pinterest.com", "quora.com", "facebook.com", "instagram.com", "tiktok.com"],
+  };
   const plans: SearchPlan[] = [
-    { ...common, query: `${t}${kind} 2026 sponsors partners` },
-    { ...common, query: `${t}${kind} 2025 our sponsors title sponsor gold sponsor` },
-    { ...common, query: `${t}${kind} powered by sponsored by partners` },
+    { ...common, query: `${t}${kind}${loc} ${currentYear} sponsors partners` },
+    { ...common, query: `${t}${kind}${loc} ${prevYear} our sponsors title sponsor gold sponsor` },
+    { ...common, query: `${t}${kind}${loc} powered by sponsored by partners` },
   ];
   if (kind === "hackathon") {
     plans.push(
-      { ...common, query: `${t}hackathon 2026 hackathon sponsors`, includeDomains: ["devpost.com"] },
-      { ...common, query: `${t}hackathon sponsors partners`, includeDomains: ["devfolio.co"] },
-      { ...common, query: `${t}hackathon powered by sponsors partners`, includeDomains: ["unstop.com"] },
-      { ...common, query: `${t}hackathon sponsors prizes`, includeDomains: ["hackerearth.com", "devpost.com", "dorahacks.io"] },
+      { ...common, query: `${t}hackathon${loc} ${currentYear} hackathon sponsors`, includeDomains: ["devpost.com", "devfolio.co", "unstop.com"] },
+      { ...common, query: `${t}hackathon sponsors track prizes partners`, includeDomains: ["hackerearth.com", "dorahacks.io", "mlh.io"] },
     );
   }
   return plans;
@@ -491,9 +559,9 @@ function fetchableVariant(url: string): string {
 }
 
 const SPONSOR_CUE =
-  /sponsor|partner|powered by|presented by|backed by|supported by|in association with|in collaboration with|brought to you by|best use of|prizes? (?:by|from)/gi;
+  /sponsor|partner|powered by|presented by|backed by|supported by|in association with|in collaboration with|brought to you by|best use of|prizes? (?:by|from)|bounties? (?:by|from)|grants? (?:by|from)|credits (?:by|from)|api partner/gi;
 const STRONG_CUE =
-  /(?:title|gold|silver|platinum|diamond|bronze|associate|official|premium|tech(?:nology)?|cloud|venue|prize|track|co|hackathon|our|event|knowledge|community|tooling|education|career|domain|basic)[- ]?(?:sponsors?|partners?)\b|powered by|sponsored by|presented by|best use of/gi;
+  /(?:title|gold|silver|platinum|diamond|bronze|associate|official|premium|tech(?:nology)?|cloud|venue|prize|track|co|hackathon|our|event|knowledge|community|tooling|education|career|domain|basic|ecosystem)[- ]?(?:sponsors?|partners?)\b|powered by|sponsored by|presented by|best use of|cloud credits|bounty sponsor/gi;
 
 /** The page text around its sponsor cues, with repeated lines collapsed. Empty when the page has no cues. */
 function sponsorWindows(text: string): string {

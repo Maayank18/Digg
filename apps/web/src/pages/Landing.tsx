@@ -1,5 +1,6 @@
 import { Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { AuthButton, DEMO_URL, MarketingFooter, MarketingNav, TypedLines } from "../components/Marketing";
 
 /*
@@ -133,15 +134,12 @@ export function Landing() {
           <MoleEyes />
         </div>
         <div className="hero-ctas">
+          <Link className="px-btn lg" to="/dashboard" style={{ textDecoration: "none" }}>
+            Open Workspace &rarr;
+          </Link>
           <a className="px-btn lg" href={DEMO_URL} target="_blank" rel="noreferrer">
             <Play size={12} fill="currentColor" style={{ display: "inline" }} /> Watch the demo
           </a>
-          <AuthButton mode="signup" className="px-btn lg">
-            Sign up free
-          </AuthButton>
-          <AuthButton mode="login" className="px-btn lg">
-            Log in
-          </AuthButton>
         </div>
       </section>
 

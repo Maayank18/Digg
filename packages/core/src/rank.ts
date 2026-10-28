@@ -35,9 +35,16 @@ export function scoreRecord(input: {
     return time > best ? time : best;
   }, 0);
   const recency = round4(newest ? clamp(1 - daysBetween(new Date(newest).toISOString(), input.now) / 200, 0.15, 1) : 0.4);
-  const sourceCount = round4(input.sources.length >= 3 ? 1 : input.sources.length === 2 ? 0.75 : 0.45);
   const officialSource = round4(
     Math.max(...input.sources.map((source) => authorityScore(source.authority)), 0.4),
+  );
+  const hasOfficial = officialSource >= 0.95;
+  const sourceCount = round4(
+    input.sources.length >= 3
+      ? 1
+      : input.sources.length === 2
+        ? (hasOfficial ? 0.88 : 0.75)
+        : (hasOfficial ? 0.72 : 0.45),
   );
   const verified = input.fields.last_verified || input.fields.deadline || input.fields.start_date;
   const age = verified ? daysBetween(verified, input.now) : input.blueprint.freshness.maxAgeDays;

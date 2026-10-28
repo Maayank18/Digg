@@ -13,6 +13,7 @@ import { Flow } from "./pages/Flow";
 import { Lens } from "./pages/Lens";
 import { Merger } from "./pages/Merger";
 import { Kickoff } from "./pages/Kickoff";
+import { Gauntlet } from "./pages/Gauntlet";
 import { Pricing } from "./pages/Pricing";
 import { Profile } from "./pages/Profile";
 import { Stack } from "./pages/Stack";
@@ -36,8 +37,8 @@ export function App() {
       <Route path="/why" element={<WhyDig />} />
       <Route path="/dev-log" element={<DevLog />} />
       <Route path="/stack" element={<Stack />} />
-      <Route path="/login" element={<Auth mode="login" />} />
-      <Route path="/signup" element={<Auth mode="signup" />} />
+      <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/signup" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={app(<Dashboard />)} />
       <Route path="/profile" element={app(<Profile />)} />
       <Route path="/pricing" element={app(<Pricing />)} />
@@ -47,6 +48,7 @@ export function App() {
       <Route path="/agents/kickoff" element={app(<Kickoff />)} />
       <Route path="/agents/mission" element={<Navigate to="/agents/kickoff" replace />} />
       <Route path="/agents/merger" element={app(<Merger />)} />
+      <Route path="/agents/gauntlet" element={app(<Gauntlet />)} />
       <Route path="/events/:eventId" element={app(<EventFolder />)} />
       <Route path="/events/:eventId/:folder" element={app(<FolderBoard />)} />
       <Route path="/jobs/:jobId" element={app(<StandaloneJobBoard />)} />

@@ -241,7 +241,7 @@ export function NewQuerySheet({ event, onClose, initialQuery }: { event: DigEven
         body: JSON.stringify({ query: trimmed }),
       });
       eventStored(result.event);
-      navigate(`/events/${event.id}/${result.folder}`);
+      navigate(`/events/${event.id}/${result.folder}?board=1`);
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "UNSUPPORTED_INTENT") setError(caught.message);
       else setError(caught instanceof Error ? caught.message : "Could not start the search.");
@@ -291,8 +291,8 @@ export function NewQuerySheet({ event, onClose, initialQuery }: { event: DigEven
               checking ? "Reading your question…" : "Keep typing…"
             ) : unsupported ? (
               <>
-                <b>That search isn’t supported yet.</b> It reads as a {current.label.toLowerCase()}. Dig can research sponsors, judges,
-                mentors & speakers, jobs, leads and competitors right now.
+                <b>That search isn’t supported yet.</b> It reads as a {current.label.toLowerCase()}. Dig can research hackathons &amp; events,
+                research papers, sponsors, judges, mentors &amp; researchers, jobs, leads and competitors right now.
               </>
             ) : (
               <>

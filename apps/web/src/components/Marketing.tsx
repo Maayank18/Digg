@@ -27,8 +27,7 @@ function LinkedInMark() {
   );
 }
 
-/** Where the cosmetic auth screens live. Shared by the hero CTAs and the navbar so both behave the same. */
-const AUTH_PATHS = { login: "/login", signup: "/signup" } as const;
+const AUTH_PATHS = { login: "/dashboard", signup: "/dashboard" } as const;
 
 export function AuthButton({ mode, className, children }: { mode: keyof typeof AUTH_PATHS; className: string; children: ReactNode }) {
   const navigate = useNavigate();
@@ -62,12 +61,9 @@ export function MarketingNav() {
         <a href={GUIDE_URL} target="_blank" rel="noreferrer" className="mk-link pixel">
           Guide
         </a>
-        <AuthButton mode="login" className="mk-link mk-auth pixel">
-          Log in
-        </AuthButton>
-        <AuthButton mode="signup" className="px-btn mk-signup">
-          Sign Up
-        </AuthButton>
+        <Link to="/dashboard" className="px-btn mk-signup">
+          Open Dashboard
+        </Link>
         <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="mk-github pixel">
           <GithubMark /> GitHub
         </a>

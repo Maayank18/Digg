@@ -26,10 +26,9 @@ import { env } from "./env.js";
      A record whose identity (company, role, person) isn't on the page is dropped.
   4. Leads only: each company's public email/phone is found on its own site, the same way sponsors are.
 */
-
 const DEADLINE_MS = 110_000;
-const BATCH_CHARS = 10_000;
-const DOC_CHARS = 2_200;
+const BATCH_CHARS = 18_000;
+const DOC_CHARS = 6_000;
 const MAX_BATCHES = 8;
 
 interface IntentSpec {
@@ -43,13 +42,45 @@ interface IntentSpec {
 const JOB_BOARDS = /^(wellfound|angel|angellist|instahyre|cutshort|naukri|indeed|glassdoor|linkedin|foundit|monster|iimjobs|hirist|internshala|y combinator|yc|work at a startup|shine|apna|unstop|jobs?)$/i;
 const GENERIC_NAME = /^(the )?(company|startup|team|us|we|our client|confidential|stealth|various)$/i;
 
+const LOW_SIGNAL_EXCLUDES = [
+  "pinterest.com",
+  "quora.com",
+  "facebook.com",
+  "instagram.com",
+  "tiktok.com",
+  "scribd.com",
+  "coursehero.com",
+];
+
+function cleanEventTopic(topic: string): string {
+  return topic
+    .replace(/\b(find|search|upcoming|active|live|top|best|hackathons?|events?|conferences?|competitions?|gatherings?|meetups?|in|at|for|the|of|on)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanPaperTopic(topic: string): string {
+  return topic
+    .replace(/\b(find|search|recent|latest|top|best|research|papers?|studies?|preprints?|articles?|scientific|in|at|for|the|of|on|about)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanJudgeTopic(topic: string): string {
+  return topic
+    .replace(/\b(find|search|who|could|be|judges?|mentors?|speakers?|keynotes?|experts?|professionals?|for|our|hackathons?|conference|in|at)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const SPECS: Partial<Record<IntentId, IntentSpec>> = {
   JOB_LOOKUP: {
     searches: (topic, place) => [
-      { query: `${topic} jobs ${place}`.trim(), includeDomains: ["wellfound.com"], maxResults: 8, chunks: true },
-      { query: `${topic} ${place}`.trim(), includeDomains: ["ycombinator.com", "workatastartup.com"], maxResults: 8, chunks: true },
-      { query: `${topic} jobs ${place}`.trim(), includeDomains: ["instahyre.com", "cutshort.io", "hirist.tech", "internshala.com"], maxResults: 8, chunks: true },
-      { query: `${topic} job openings ${place} apply`.trim(), maxResults: 8, chunks: true },
+      { query: `${topic} jobs ${place}`.trim(), includeDomains: ["wellfound.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 8, depth: "advanced", chunks: true },
+      { query: `${topic} ${place}`.trim(), includeDomains: ["ycombinator.com", "workatastartup.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 8, depth: "advanced", chunks: true },
+      { query: `${topic} ${place} careers hiring apply`.trim(), includeDomains: ["boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 8, depth: "advanced", chunks: true },
+      { query: `${topic} jobs ${place}`.trim(), includeDomains: ["instahyre.com", "cutshort.io", "hirist.tech", "internshala.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 8, depth: "advanced", chunks: true },
+      { query: `${topic} job openings ${place} apply now`.trim(), excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 8, depth: "advanced", chunks: true },
     ],
     guidance: (topic) =>
       `Each record is ONE open role at ONE hiring company, relevant to "${topic}". role_title: the job title exactly as written. ` +
@@ -61,23 +92,23 @@ const SPECS: Partial<Record<IntentId, IntentSpec>> = {
   },
   LEAD_LOOKUP: {
     searches: (topic, place) => [
-      { query: `${topic} ${place} companies list`.trim(), maxResults: 8, chunks: true },
-      { query: `top ${topic} ${place}`.trim(), maxResults: 8, chunks: true },
-      { query: `${topic} ${place}`.trim(), includeDomains: ["yourstory.com", "inc42.com", "tracxn.com", "entrackr.com", "startupindia.gov.in"], maxResults: 8, chunks: true },
+      { query: `${topic} ${place} companies directory overview`.trim(), excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
+      { query: `top ${topic} ${place} startups companies`.trim(), excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
+      { query: `${topic} ${place}`.trim(), includeDomains: ["yourstory.com", "inc42.com", "tracxn.com", "entrackr.com", "startupindia.gov.in", "crunchbase.com", "producthunt.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
     ],
     guidance: (topic) =>
-      `Each record is ONE company that fits the target "${topic}" and could be approached as a customer. company_name: the company's name as written. ` +
-      `category: a few words from the text saying what the company does. website: only if its domain is written in the text. ` +
+      `Each record is ONE company, startup or organization that fits "${topic}". company_name: the company's name as written. ` +
+      `category: a few words from the text saying what the company does or provides. website: only if its domain is written in the text. ` +
       `contact / email / phone: only if written in the text next to that company. Never include the publisher of the article or list itself.`,
     identity: ["company_name"],
     reject: (fields, _topic, url) => GENERIC_NAME.test(fields.company_name ?? "") || sameAsPublisher(fields.company_name, url),
   },
   COMPETITOR_LOOKUP: {
     searches: (topic) => [
-      { query: `${topic} competitors`, maxResults: 8, chunks: true },
-      { query: `${topic} alternatives`, includeDomains: ["g2.com", "capterra.com", "alternativeto.net", "getapp.com", "softwareadvice.com"], maxResults: 8, chunks: true },
-      { query: `${topic} vs`, includeDomains: ["youtube.com"], maxResults: 8, chunks: true },
-      { query: `${topic} alternative`, includeDomains: ["instagram.com"], maxResults: 6, chunks: true },
+      { query: `${topic} competitors alternatives`.trim(), excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
+      { query: `${topic} alternatives`.trim(), includeDomains: ["g2.com", "capterra.com", "alternativeto.net", "getapp.com", "softwareadvice.com", "trustradius.com", "producthunt.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
+      { query: `${topic} vs`.trim(), includeDomains: ["youtube.com"], maxResults: 8, depth: "advanced", chunks: true },
+      { query: `${topic} alternative software tools`.trim(), excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 8, depth: "advanced", chunks: true },
     ],
     guidance: (topic) =>
       `Each record is ONE product or company that competes with, or is presented as an alternative to, "${topic}". ` +
@@ -88,20 +119,133 @@ const SPECS: Partial<Record<IntentId, IntentSpec>> = {
     reject: (fields, topic) => sameName(fields.company_name, topic) || GENERIC_NAME.test(fields.company_name ?? ""),
   },
   JUDGE_LOOKUP: {
-    searches: (topic, place) => [
-      { query: `${topic} hackathon judges ${place}`.trim(), maxResults: 8, chunks: true },
-      { query: `${topic} hackathon mentors jury panel ${place}`.trim(), maxResults: 8, chunks: true },
-      { query: `${topic} hackathon conference speakers keynote ${place}`.trim(), maxResults: 8, chunks: true },
-      { query: `${topic} ${place}`.trim(), includeDomains: ["scholar.google.com"], maxResults: 8, chunks: true },
-      { query: `${topic} researcher professor ${place} expert`.trim(), maxResults: 6, chunks: true },
-    ],
+    searches: (topic, place) => {
+      const clean = cleanJudgeTopic(topic) || topic;
+      const loc = place ? ` ${place}` : "";
+      return [
+        { query: `${clean} hackathon judges mentors jury${loc}`.trim(), includeDomains: ["devpost.com", "devfolio.co", "unstop.com"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
+        { query: `${clean} keynote speakers conference tech summit${loc}`.trim(), includeDomains: ["sessionize.com", "papercall.io"], excludeDomains: LOW_SIGNAL_EXCLUDES, maxResults: 10, depth: "advanced", chunks: true },
+        { query: `${clean} researcher professor${loc}`.trim(), includeDomains: ["scholar.google.com"], maxResults: 10, depth: "advanced", chunks: true },
+        { query: `${clean} principal research scientist professor tech lead${loc}`.trim(), includeDomains: ["linkedin.com"], maxResults: 8, depth: "advanced", chunks: true },
+      ];
+    },
     guidance: (topic) =>
-      `Each record is ONE real, named person who has judged, mentored or spoken at an event, or is a recognised expert in "${topic}". ` +
-      `person_name: the full name exactly as written. affiliation: their company, university or title as written. ` +
+      `Each record is ONE real, named person who has judged, mentored or spoken at an event, or is a recognised expert/researcher in "${topic}". ` +
+      `person_name: the full name exactly as written. affiliation: their company, university, lab or title as written. ` +
       `expertise: their field or research topic as written. event_name: the event they judged, mentored or spoke at, if named. ` +
       `email: only if written. Skip organisations, teams and anyone without a full name.`,
     identity: ["person_name"],
     reject: (fields) => !/\s/.test((fields.person_name ?? "").trim()) || /\b(team|committee|panel|judges|mentors|speakers)\b/i.test(fields.person_name ?? ""),
+  },
+  EVENT_LOOKUP: {
+    searches: (topic, place) => {
+      const clean = cleanEventTopic(topic);
+      const theme = clean ? `${clean} ` : "";
+      const loc = place ? ` ${place}` : "";
+      const currentYear = new Date().getFullYear();
+      const nextYear = currentYear + 1;
+      return [
+        {
+          query: `${theme}hackathon${loc} ${currentYear} ${nextYear} registration devfolio unstop devpost`.trim(),
+          includeDomains: ["devfolio.co", "unstop.com", "hackerearth.com", "devpost.com", "mlh.io", "dorahacks.io", "ethglobal.com"],
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 10,
+          depth: "advanced",
+          chunks: true,
+        },
+        {
+          query: `upcoming ${theme}hackathons${loc} prize pool cash awards registration "register"`.trim(),
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 10,
+          depth: "advanced",
+          chunks: true,
+        },
+        {
+          query: `${theme}hackathon tech events${loc} ${currentYear}`.trim(),
+          includeDomains: ["lu.ma", "eventbrite.com", "meetup.com", "kaggle.com"],
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 8,
+          depth: "advanced",
+          chunks: true,
+        },
+        {
+          query: `top ${theme}hackathons${loc} ${currentYear} timeline dates mode online in-person`.trim(),
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 8,
+          depth: "advanced",
+          chunks: true,
+        },
+      ];
+    },
+    guidance: (topic) =>
+      `Each record is ONE real hackathon, tech conference or summit, relevant to "${topic}". ` +
+      `event_name: the official title/name of the hackathon or event as written. ` +
+      `organizer: the university, company, community, or host organizing it. ` +
+      `dates: dates, duration or timing as written (e.g. "Oct 15 - 17, 2026", "36 Hours", "Nov 2026"). ` +
+      `location: city/venue or "Online" / "Hybrid" / "In-person" as written. ` +
+      `prize_pool: total prize money, cash awards, bounties, or grants if stated (e.g. "₹5,00,000", "$25,000", "Swag & Cash Prizes"). ` +
+      `website: official registration link, application URL, or website if given. ` +
+      `description: brief theme, tracks, or eligibility criteria. ` +
+      `Skip generic platforms or aggregators like Devfolio or Unstop themselves; extract the actual hackathons hosted on them.`,
+    identity: ["event_name"],
+    reject: (fields) =>
+      !fields.event_name ||
+      /^(hackathon|hackathons|event|events|conference|meetup|devpost|devfolio|unstop|hackerearth|dorahacks)$/i.test(fields.event_name.trim()) ||
+      GENERIC_NAME.test(fields.event_name.trim()),
+  },
+  PAPER_LOOKUP: {
+    searches: (topic) => {
+      const clean = cleanPaperTopic(topic) || topic;
+      return [
+        {
+          query: `${clean} research paper arXiv abs pdf`.trim(),
+          includeDomains: ["arxiv.org", "semanticscholar.org"],
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 10,
+          depth: "advanced",
+          chunks: true,
+        },
+        {
+          query: `${clean} conference proceedings NeurIPS ICML CVPR ICLR ACL ACM`.trim(),
+          includeDomains: ["openreview.net", "aclanthology.org", "paperswithcode.com", "ieee.org", "dl.acm.org"],
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 10,
+          depth: "advanced",
+          chunks: true,
+        },
+        {
+          query: `${clean} research papers download pdf abstract authors`.trim(),
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 10,
+          depth: "advanced",
+          chunks: true,
+        },
+        {
+          query: `${clean} scientific publications methodology findings benchmark`.trim(),
+          includeDomains: ["scholar.google.com", "nature.com", "sciencedirect.com", "springer.com", "pubmed.ncbi.nlm.nih.gov"],
+          excludeDomains: LOW_SIGNAL_EXCLUDES,
+          maxResults: 8,
+          depth: "advanced",
+          chunks: true,
+        },
+      ];
+    },
+    guidance: (topic) =>
+      `Each record is ONE published academic or research paper, relevant to "${topic}". ` +
+      `paper_title: the exact title of the paper as written. ` +
+      `authors: primary authors or researchers as written (separated by commas). ` +
+      `venue: conference, journal, or preprint repository (e.g. "arXiv", "NeurIPS", "CVPR", "ICLR", "IEEE", "Nature", "ACM"). ` +
+      `year: year or date of publication (e.g. "2025", "2026"). ` +
+      `topic: a brief 1-sentence summary of the paper's core topic, methodology or key findings. ` +
+      `pdf_url: direct URL to the downloadable PDF or paper preprint page (e.g. https://arxiv.org/pdf/..., https://arxiv.org/abs/...). ` +
+      `citations: citation count or signal if stated. ` +
+      `website: official paper page, publisher URL, or DOI. ` +
+      `Skip blog posts or general opinion articles that are not real academic/research papers.`,
+    identity: ["paper_title"],
+    reject: (fields) =>
+      !fields.paper_title ||
+      /^(research paper|papers|arxiv|abstract|introduction|pdf|download|index)$/i.test(fields.paper_title.trim()) ||
+      fields.paper_title.length < 5,
   },
 };
 
@@ -256,7 +400,9 @@ export async function collectIntent(blueprint: CollectionBlueprint, collectedAt:
       }
       // A website is only kept when its domain is written on the page AND belongs to the entity itself —
       // an article's own domain or a link aggregator is not the company's site.
-      if (claims.website && !ownWebsite(claims.website, claims.company_name ?? "", doc.text)) delete claims.website;
+      if (claims.website && blueprint.intent !== "EVENT_LOOKUP" && blueprint.intent !== "PAPER_LOOKUP" && !ownWebsite(claims.website, claims.company_name ?? "", doc.text)) {
+        delete claims.website;
+      }
       // "Best for teams", "Alternative", "Top pick" are article labels, not what the product is.
       if (claims.category && LABEL_NOT_CATEGORY.test(claims.category)) delete claims.category;
       delete claims.profile_url;
@@ -266,15 +412,16 @@ export async function collectIntent(blueprint: CollectionBlueprint, collectedAt:
       }
       claims.source_url = doc.url;
       claims.last_verified = doc.publishedAt || collectedAt.slice(0, 10);
+      const entityLabel = claims.company_name || claims.event_name || claims.paper_title || claims.person_name;
       const grounded = provenance({
         url: doc.url,
         title: doc.title,
         text: doc.text,
         publishedAt: doc.publishedAt,
-        sourceType: /scholar\.google/.test(doc.url) ? "scholar" : /youtube|instagram/.test(doc.url) ? "social" : "web_search",
+        sourceType: /scholar\.google/.test(doc.url) || /arxiv\.org/.test(doc.url) ? "scholar" : /youtube|instagram/.test(doc.url) ? "social" : "web_search",
         extractionMethod: "tavily+llm",
         claims,
-        entity: claims.company_name,
+        entity: entityLabel,
       });
       if (!grounded || spec.identity.some((field) => !grounded.fields[field])) {
         dropped.ungrounded += 1;
@@ -286,7 +433,28 @@ export async function collectIntent(blueprint: CollectionBlueprint, collectedAt:
         continue;
       }
       // A Google Scholar result is the person's own profile page.
-      if (blueprint.intent === "JUDGE_LOOKUP" && /scholar\.google\.[a-z.]+\/citations/.test(doc.url)) grounded.fields.profile_url = doc.url;
+      if (blueprint.intent === "JUDGE_LOOKUP" && /scholar\.google\.[a-z.]+\/citations/.test(doc.url)) {
+        grounded.fields.profile_url = doc.url;
+      }
+      if (blueprint.intent === "PAPER_LOOKUP") {
+        if (!grounded.fields.pdf_url) {
+          if (/arxiv\.org\/abs\//i.test(doc.url)) {
+            grounded.fields.pdf_url = doc.url.replace("/abs/", "/pdf/") + ".pdf";
+          } else if (/openreview\.net\/forum\?id=/i.test(doc.url)) {
+            grounded.fields.pdf_url = doc.url.replace("/forum?", "/pdf?");
+          } else if (/aclanthology\.org/i.test(doc.url) && !doc.url.endsWith(".pdf")) {
+            grounded.fields.pdf_url = doc.url.replace(/\/?$/, ".pdf");
+          } else if (/\.pdf$/i.test(doc.url)) {
+            grounded.fields.pdf_url = doc.url;
+          }
+        }
+        if (!grounded.fields.website) {
+          grounded.fields.website = doc.url;
+        }
+      }
+      if (blueprint.intent === "EVENT_LOOKUP" && !grounded.fields.website) {
+        grounded.fields.website = doc.url;
+      }
       const canonicalEntityId = slug(spec.identity.map((field) => grounded.fields[field]).join(" "));
       if (!canonicalEntityId) continue;
       records.push({ canonicalEntityId, fields: grounded.fields, sources: [grounded.source] });

@@ -18,16 +18,19 @@ export interface ParsedQuery {
 const SYSTEM = `You route research questions for Dig, a tool that finds real, sourced records on the web.
 Pick exactly one intent:
 - SPONSOR_LOOKUP: companies that sponsor or partner with events/hackathons ("who sponsors hackathons in India", "sponsor search", "start a sponsor search").
-- JUDGE_LOOKUP: people to judge, mentor or speak at an event: experts, researchers, jury, keynote or guest speakers ("AI researchers who could judge our hackathon", "speakers for tech summit", "speaker search", "start a speaker search").
+- JUDGE_LOOKUP: people to judge, mentor or speak at an event, or academic researchers/professors to connect with ("AI researchers who could judge our hackathon", "researchers in NLP in Delhi", "professors in robotics", "speakers for tech summit").
+- EVENT_LOOKUP: hackathons, tech events, conferences, or summits to participate in or attend ("find hackathons in delhi", "AI hackathons 2026", "upcoming hackathons with prize money", "web3 conferences in India").
+- PAPER_LOOKUP: academic research papers, scientific studies, arXiv preprints, or conference proceedings ("research papers on diffusion models", "papers on LLM reasoning", "arxiv papers on quantum computing", "latest AI research papers").
 - JOB_LOOKUP: open jobs, internships or roles to apply for ("frontend internships in Bangalore").
 - LEAD_LOOKUP: companies to sell to or reach out to, with contacts ("D2C skincare brands in Mumbai to pitch our analytics tool").
 - COMPETITOR_LOOKUP: competitors or alternatives to a product/company ("competitors of Notion").
 - COMPANY_LOOKUP: profiles of companies in general, not for sales or competition ("SaaS companies in Pune").
-- EVENT_LOOKUP: events, conferences or hackathons themselves ("upcoming AI conferences").
 - PRODUCT_LOOKUP, MARKET_LOOKUP, FUNDING_LOOKUP, VENDOR_LOOKUP: products in a category, market trends, grants/funding, suppliers.
 Also extract, copying words from the question where possible:
-- subject: what the search is about, short (e.g. "AI", "frontend developer", "Notion", "D2C skincare brands", "hackathons"). null if none.
-  For JUDGE_LOOKUP: the field of expertise ("AI", "cybersecurity"), or the event if one is named.
+- subject: what the search is about, short (e.g. "AI", "frontend developer", "diffusion models", "Notion", "D2C skincare brands", "hackathons"). null if none.
+  For JUDGE_LOOKUP: the field of expertise ("AI", "cybersecurity", "NLP"), or the event if one is named.
+  For EVENT_LOOKUP: the theme or kind of event ("AI", "web3", "hackathon", "fintech").
+  For PAPER_LOOKUP: the research topic or subject ("diffusion models", "quantum algorithms", "LLM reasoning").
   For LEAD_LOOKUP: the kind of company to reach out to (the target customers, e.g. "D2C skincare brands", "hospitals", "startups") — NEVER the user's own product. If the target isn't described, use "companies".
   For COMPETITOR_LOOKUP: the product or company whose competitors are wanted.
 - location: a city, region or country named in the question, else null.

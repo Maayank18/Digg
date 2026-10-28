@@ -22,6 +22,11 @@ describe("intent matching", () => {
     expect(matchIntent("speaker search").intent).toBe("JUDGE_LOOKUP");
     expect(matchIntent("sponsor search").intent).toBe("SPONSOR_LOOKUP");
     expect(matchIntent("AI hackathon mentors and judges in Bangalore").intent).toBe("JUDGE_LOOKUP");
+    expect(matchIntent("find hackathons in delhi").intent).toBe("EVENT_LOOKUP");
+    expect(matchIntent("Upcoming AI hackathons in India with cash prizes").intent).toBe("EVENT_LOOKUP");
+    expect(matchIntent("find research papers on diffusion models").intent).toBe("PAPER_LOOKUP");
+    expect(matchIntent("arxiv preprints on generative video architectures").intent).toBe("PAPER_LOOKUP");
+    expect(matchIntent("AI researchers and keynote speakers for our hackathon").intent).toBe("JUDGE_LOOKUP");
   });
 
   it("builds a sponsor blueprint with Delhi NCR and nine fields", () => {

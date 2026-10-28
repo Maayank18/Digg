@@ -397,3 +397,66 @@ CREATE TABLE IF NOT EXISTS agent_connectors (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (workspace_id, provider)
 );
+
+CREATE TABLE IF NOT EXISTS gauntlet_rooms (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'squad',
+  description TEXT,
+  owner_id TEXT NOT NULL,
+  workspace_id TEXT,
+  members_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gauntlet_hackathons (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  workspace_id TEXT,
+  room_id TEXT,
+  name TEXT NOT NULL,
+  phase TEXT NOT NULL DEFAULT 'targeting',
+  target_date TEXT,
+  submit_deadline TEXT,
+  round_date TEXT,
+  prize_pool TEXT,
+  organizer TEXT,
+  registrar TEXT,
+  track TEXT,
+  link TEXT,
+  repo_url TEXT,
+  deck_url TEXT,
+  demo_url TEXT,
+  submission_url TEXT,
+  registrants_count INTEGER NOT NULL DEFAULT 0,
+  registrants_as_of TEXT,
+  teammates_json TEXT NOT NULL DEFAULT '[]',
+  checklist_json TEXT NOT NULL DEFAULT '[]',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  notes TEXT,
+  results TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES gauntlet_rooms(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS gauntlet_updates (
+  id TEXT PRIMARY KEY,
+  hackathon_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  body TEXT NOT NULL,
+  badge TEXT NOT NULL DEFAULT 'update',
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (hackathon_id) REFERENCES gauntlet_hackathons(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_gauntlet_rooms_code ON gauntlet_rooms(code);
+CREATE INDEX IF NOT EXISTS idx_gauntlet_rooms_owner ON gauntlet_rooms(owner_id);
+CREATE INDEX IF NOT EXISTS idx_gauntlet_hackathons_user ON gauntlet_hackathons(user_id, phase, submit_deadline);
+CREATE INDEX IF NOT EXISTS idx_gauntlet_hackathons_room ON gauntlet_hackathons(room_id, phase, submit_deadline);
+CREATE INDEX IF NOT EXISTS idx_gauntlet_updates_hackathon ON gauntlet_updates(hackathon_id, created_at);
+
+

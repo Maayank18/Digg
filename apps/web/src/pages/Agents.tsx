@@ -12,6 +12,7 @@ const FOLDERS = [
   { to: "/agents/lens", name: "Lens", help: TOOL_HELP.lens },
   { to: "/agents/merger", name: "Merger", help: TOOL_HELP.merger },
   { to: "/agents/flow", name: "Flow", help: TOOL_HELP.flow },
+  { to: "/agents/gauntlet", name: "Gauntlet", help: TOOL_HELP.gauntlet },
 ];
 
 export function AgentsHome() {
@@ -22,7 +23,7 @@ export function AgentsHome() {
     <AppWindow
       crumbs={[{ label: ROOT_CRUMB, to: "/dashboard" }, { label: "Toolkit" }]}
       sidebar="agents"
-      status="4 folders"
+      status="5 folders"
       actions={
         <button className="btn" onClick={() => setIntroOpen(true)}>
           <HelpCircle size={14} /> What is Toolkit?

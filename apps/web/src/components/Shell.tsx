@@ -7,7 +7,7 @@ import { Tip } from "./Tip";
 import { initials, logOut, useSession } from "../session";
 import { AskDiglett } from "./Diglett";
 
-export type SideView = "favourites" | "recent" | "archived" | "profile" | "pricing" | "agents" | "flow" | "lens" | "mission" | "merger" | null;
+export type SideView = "favourites" | "recent" | "archived" | "profile" | "pricing" | "agents" | "flow" | "lens" | "mission" | "merger" | "gauntlet" | null;
 export type Appearance = "light" | "dark";
 
 const APPEARANCE_KEY = "dig-appearance";
@@ -203,10 +203,24 @@ export function AppWindow(props: {
             {props.crumbs.map((crumb, index) => {
               const last = index === props.crumbs.length - 1;
               return (
-                <span key={`${crumb.label}-${index}`} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                  {index > 0 && <ChevronRight size={14} color="#aeaeb2" />}
+                <span
+                  key={`${crumb.label}-${index}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    minWidth: 0,
+                    flexShrink: last ? 1 : 0,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {index > 0 && <ChevronRight size={14} color="#aeaeb2" style={{ flexShrink: 0 }} />}
                   {crumb.icon}
-                  {last || !crumb.to ? <b>{crumb.label}</b> : <Link to={crumb.to}>{crumb.label}</Link>}
+                  {last || !crumb.to ? (
+                    <b style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{crumb.label}</b>
+                  ) : (
+                    <Link to={crumb.to} style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{crumb.label}</Link>
+                  )}
                 </span>
               );
             })}
@@ -287,10 +301,10 @@ function Sidebar({ active }: { active: SideView }) {
       <h6>Toolkit</h6>
       <div className="side-group">
         <Tip text={NAV_HELP.toolkit} block>
-          <Link to="/agents" className={`side-item${active === "agents" || active === "flow" || active === "lens" || active === "mission" || active === "merger" ? " active" : ""}`}>
+          <Link to="/agents" className={`side-item${active === "agents" || active === "flow" || active === "lens" || active === "mission" || active === "merger" || active === "gauntlet" ? " active" : ""}`}>
             <Folder size={16} />
             Toolkit
-            <span className="count">4</span>
+            <span className="count">5</span>
           </Link>
         </Tip>
       </div>

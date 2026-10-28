@@ -9,22 +9,36 @@ export interface Session {
   workspace: { id: string; name: string };
 }
 
-/** The signed-in user, `null` when logged out, `undefined` while the check is in flight. */
+export const DEFAULT_SESSION: Session = {
+  user: {
+    id: "08e86e12-83f0-47aa-9f29-810db54a02e7",
+    name: "Mayank Garg",
+    email: "maayank51518@gmail.com",
+    role: "",
+  },
+  workspace: {
+    id: "eab790e8-cfca-408b-be1d-0334cdaf365a",
+    name: "Mayank Garg’s workspace",
+  },
+};
+
+/** The signed-in user (defaults to Mayank Garg workspace when auth is removed). */
 export function useSession() {
   const query = useQuery({
     queryKey: ["me"],
     queryFn: async () => {
       try {
-        return await api<Session>("/api/auth/me");
+        const res = await api<Session>("/api/auth/me");
+        return res ?? DEFAULT_SESSION;
       } catch (error) {
-        if (error instanceof ApiError && error.status === 401) return null;
-        throw error;
+        if (error instanceof ApiError && error.status === 401) return DEFAULT_SESSION;
+        return DEFAULT_SESSION;
       }
     },
     retry: false,
     staleTime: 60_000,
   });
-  return { session: query.data, loading: query.isLoading, error: query.error };
+  return { session: query.data ?? DEFAULT_SESSION, loading: query.isLoading && !query.data, error: query.error };
 }
 
 export async function logOut() {
@@ -32,7 +46,7 @@ export async function logOut() {
     await api("/api/auth/logout", { method: "POST" });
   } finally {
     queryClient.clear();
-    queryClient.setQueryData(["me"], null);
+    queryClient.setQueryData(["me"], DEFAULT_SESSION);
   }
 }
 
@@ -42,10 +56,9 @@ export function initials(name: string): string {
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "")).toUpperCase();
 }
 
-/** Renders app screens only for a signed-in user; otherwise sends them to log in and back here afterwards. */
+/** Renders app screens without requiring login since authentication has been removed. */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, loading, error } = useSession();
-  const location = useLocation();
+  const { loading, error } = useSession();
   if (loading) return <div className="boot">Loading…</div>;
   if (error) {
     return (
@@ -60,6 +73,5 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!session) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   return <>{children}</>;
 }

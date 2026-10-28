@@ -25,8 +25,10 @@ export interface PitchRequest {
 
 const ASKS: Partial<Record<IntentId, string>> = {
   SPONSOR_LOOKUP: "Ask whether they would consider sponsoring or partnering with our event.",
-  JUDGE_LOOKUP: "Invite them to judge, mentor or speak at our event.",
+  JUDGE_LOOKUP: "Invite them to judge, mentor or speak at our event, or connect about their research.",
   LEAD_LOOKUP: "Introduce what we offer and ask if a short call makes sense.",
+  EVENT_LOOKUP: "Reach out to the organizers regarding participation, partnership, or sponsorship.",
+  PAPER_LOOKUP: "Reach out to the authors regarding their research paper and potential collaboration.",
 };
 
 /** Search types where a first-contact email makes sense. Jobs and competitors get no pitch button. */
@@ -36,13 +38,19 @@ export function pitchSupported(intent: IntentId): boolean {
 
 const RECIPIENT_FIELDS: Array<[string, string]> = [
   ["person_name", "name"],
+  ["authors", "authors / researchers"],
+  ["paper_title", "research paper title"],
+  ["venue", "publication venue"],
   ["contact", "contact person"],
   ["contact_role", "contact person's role"],
   ["company_name", "company"],
+  ["organizer", "organizer / host"],
   ["affiliation", "affiliation"],
   ["category", "what the company does"],
   ["expertise", "expertise"],
   ["event_name", "an event they were listed at (their role there is unknown unless stated)"],
+  ["dates", "dates of event"],
+  ["prize_pool", "prize pool"],
   ["sponsorship_type", "how they took part"],
 ];
 

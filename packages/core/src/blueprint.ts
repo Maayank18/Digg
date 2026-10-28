@@ -77,8 +77,16 @@ export function suggestJobName(blueprint: CollectionBlueprint): string {
       const target = trimSubject(subject, /\b(companies|leads?|prospects?)\b/gi);
       return `${target ? `${titleCase(target)} ` : "Sales "}Leads${place}`;
     }
-    case "EVENT_LOOKUP":
-      return `Technology Events${place}`;
+    case "EVENT_LOOKUP": {
+      const isHackathon = /\bhackathon/i.test(blueprint.query);
+      const kind = isHackathon ? "Hackathons" : "Events & Conferences";
+      const cleanSubject = trimSubject(subject, /\b(hackathons?|events?|conferences?|competitions?|gatherings?|meetups?)\b/gi);
+      return `${cleanSubject ? `${titleCase(cleanSubject)} ` : ""}${kind}${place}`;
+    }
+    case "PAPER_LOOKUP": {
+      const topic = subject || category || "Research";
+      return `${titleCase(topic)} Research Papers`;
+    }
     case "COMPANY_LOOKUP":
       return category === "SaaS" ? `SaaS Companies${place}` : `Companies${place}`;
     case "PRODUCT_LOOKUP":

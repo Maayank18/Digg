@@ -47,7 +47,20 @@ export interface Progress {
 }
 
 /** The intents Dig researches end to end; the API refuses anything else with UNSUPPORTED_INTENT. */
-export const SUPPORTED_INTENTS = ["SPONSOR_LOOKUP", "JUDGE_LOOKUP", "JOB_LOOKUP", "LEAD_LOOKUP", "COMPETITOR_LOOKUP"];
+export const SUPPORTED_INTENTS = [
+  "SPONSOR_LOOKUP",
+  "JUDGE_LOOKUP",
+  "JOB_LOOKUP",
+  "LEAD_LOOKUP",
+  "COMPETITOR_LOOKUP",
+  "EVENT_LOOKUP",
+  "PAPER_LOOKUP",
+  "COMPANY_LOOKUP",
+  "VENDOR_LOOKUP",
+  "PRODUCT_LOOKUP",
+  "FUNDING_LOOKUP",
+  "MARKET_LOOKUP",
+];
 
 export class ApiError extends Error {
   constructor(
@@ -214,6 +227,12 @@ export interface DatasetRecord {
   fields: Record<string, string>;
   rank: number;
   confidence: number;
+  confidenceComponents?: {
+    sourceAuthority: number;
+    corroboration: number;
+    freshness: number;
+    extractionQuality: number;
+  };
   status: RecordStatus;
   sourceCount: number;
   flags: string[];

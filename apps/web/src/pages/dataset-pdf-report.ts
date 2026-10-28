@@ -42,17 +42,29 @@ function shortUrl(url: string | undefined) {
 }
 
 function nameOf(record: DatasetRecord) {
-  return record.fields.person_name || record.fields.company_name || record.fields.role_title || record.label || "";
+  return (
+    record.fields.paper_title ||
+    record.fields.event_name ||
+    record.fields.person_name ||
+    record.fields.company_name ||
+    record.fields.role_title ||
+    record.label ||
+    ""
+  );
 }
 
 /** The second column: who they are and what they do, from whichever fields this search type has. */
 function detailOf(record: DatasetRecord) {
   const f = record.fields;
-  const parts = f.person_name
-    ? [f.affiliation, f.expertise, f.event_name]
-    : f.role_title
-      ? [f.company_name, f.location, f.workplace]
-      : [f.category, f.sponsorship_type, f.event_name, f.contact];
+  const parts = f.paper_title
+    ? [f.authors, f.venue, f.year, f.topic]
+    : f.event_name && (f.prize_pool || f.dates || f.organizer)
+      ? [f.organizer, f.dates, f.location, f.prize_pool]
+      : f.person_name
+        ? [f.affiliation, f.expertise, f.event_name]
+        : f.role_title
+          ? [f.company_name, f.location, f.workplace]
+          : [f.category, f.sponsorship_type, f.event_name, f.contact];
   return parts.filter((part) => part?.trim()).join(" · ");
 }
 

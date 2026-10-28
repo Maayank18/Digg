@@ -38,12 +38,13 @@ export const NAV_HELP = {
   zoom: "Toggle full screen.",
 } as const;
 
-/** The four tools, worded the same in the sidebar, the Toolkit page and the intro pop-up. */
+/** The tools, worded the same in the sidebar, the Toolkit page and the intro pop-up. */
 export const TOOL_HELP = {
   kickoff: "Plan an event. Tell it your deadline and it writes a dated to-do list, with links to start the right searches.",
   lens: "See what a list is telling you: a few plain insights for that kind of list, plus a PDF.",
   merger: "Combine several lists into one spreadsheet, with duplicates merged.",
   flow: "Draw an outreach plan step by step, with your approval before anything goes out. A prototype: it does not send messages yet.",
+  gauntlet: "Zero missed deadlines: track hackathons, countdown chips, deliverable lockboxes, and live team feeds in one cockpit.",
 } as const;
 
 /** The search results page. */
@@ -132,6 +133,22 @@ export const COLUMN_HELP: Record<string, Record<string, string>> = {
     website: "The competitor's website, if its address was on the page.",
     email: CONTACT_EMAIL,
     linkedin: COMPANY_LINKEDIN,
+  },
+  EVENT_LOOKUP: {
+    event_name: "The name of the hackathon or event as published on its official page or platform.",
+    prize_pool: "The total cash prize pool, bounties, or perks listed for winners and participants.",
+    location: "City, venue, or online mode (e.g. In-person, Virtual, Hybrid) as stated.",
+    dates: "Event dates, timeline, registration deadline, and duration.",
+    organizer: "The organizing institution, company, community, or university host.",
+    website: "The official registration or submission page for this event.",
+  },
+  PAPER_LOOKUP: {
+    paper_title: "The published title of the scientific research paper or preprint.",
+    authors: "Key authors, researchers, and principal investigators listed on the paper.",
+    topic: "The research domain, core methodology, or key breakthrough findings.",
+    venue: "The conference, journal, or preprint archive (e.g. arXiv, NeurIPS, ICML, CVPR).",
+    year: "The publication or preprint release year.",
+    pdf_url: "Direct downloadable link to the open-access PDF document.",
   },
 };
 

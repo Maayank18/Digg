@@ -46,6 +46,8 @@ const INTENT_BADGES: Record<string, { label: string; color: string }> = {
   LEAD_LOOKUP: { label: "Leads", color: "#007acc" },
   JOB_LOOKUP: { label: "Jobs", color: "#248a3d" },
   COMPETITOR_LOOKUP: { label: "Competitors", color: "#b86e00" },
+  EVENT_LOOKUP: { label: "Hackathons", color: "#d97706" },
+  PAPER_LOOKUP: { label: "Papers", color: "#7c3aed" },
 };
 
 export function Merger() {

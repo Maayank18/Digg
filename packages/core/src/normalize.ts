@@ -49,7 +49,7 @@ export function normalizePhone(value: string): string {
 }
 
 const COMPANY_FIELDS = new Set(["company_name", "vendor", "organization", "organizer"]);
-const URL_FIELDS = new Set(["website", "source_url"]);
+const URL_FIELDS = new Set(["website", "source_url", "pdf_url"]);
 const EMAIL_FIELDS = new Set(["email"]);
 const DATE_FIELDS = new Set(["last_verified", "start_date", "deadline", "published_at"]);
 
@@ -115,7 +115,7 @@ export function comparisonKey(field: string, value: string): string {
   const raw = (value ?? "").trim();
   if (!raw) return "";
   if (field === "email") return normalizeEmail(raw);
-  if (field === "website" || field === "source_url") return normalizeUrl(raw).toLowerCase();
+  if (field === "website" || field === "source_url" || field === "pdf_url") return normalizeUrl(raw).toLowerCase();
   if (field === "phone") return raw.replace(/\D/g, "");
   if (field === "last_verified") return normalizeDate(raw);
   const words = raw

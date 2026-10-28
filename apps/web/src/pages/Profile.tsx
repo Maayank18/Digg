@@ -14,6 +14,8 @@ const INTENT_NAMES: Record<string, string> = {
   JOB_LOOKUP: "Jobs",
   LEAD_LOOKUP: "Leads",
   COMPETITOR_LOOKUP: "Competitors",
+  EVENT_LOOKUP: "Hackathons & Events",
+  PAPER_LOOKUP: "Research Papers",
 };
 
 export function Profile() {

@@ -12,13 +12,14 @@ export const INTENT_IDS = [
   "FUNDING_LOOKUP",
   "VENDOR_LOOKUP",
   "JUDGE_LOOKUP",
+  "PAPER_LOOKUP",
 ] as const;
 
 export const intentIdSchema = z.enum(INTENT_IDS);
 export type IntentId = z.infer<typeof intentIdSchema>;
 
-/** The intents that run end to end against the live web. Everything else is refused as "not supported yet". */
-export const LIVE_INTENTS: IntentId[] = ["SPONSOR_LOOKUP", "JOB_LOOKUP", "LEAD_LOOKUP", "COMPETITOR_LOOKUP", "JUDGE_LOOKUP"];
+/** The intents that run end to end against the live web. */
+export const LIVE_INTENTS: IntentId[] = [...INTENT_IDS];
 
 export const JOB_STATES = [
   "DRAFT",
@@ -123,7 +124,7 @@ export const profileUpdateSchema = z.object({
   role: z.string().trim().max(120).default(""),
 });
 
-export const FOLDER_KEYS = ["sponsors", "judges", "jobs", "leads", "competitors"] as const;
+export const FOLDER_KEYS = ["sponsors", "judges", "jobs", "leads", "competitors", "events", "papers"] as const;
 export const folderKeySchema = z.enum(FOLDER_KEYS);
 export type FolderKey = z.infer<typeof folderKeySchema>;
 
@@ -134,6 +135,8 @@ export const FOLDER_INTENTS: Record<FolderKey, IntentId> = {
   jobs: "JOB_LOOKUP",
   leads: "LEAD_LOOKUP",
   competitors: "COMPETITOR_LOOKUP",
+  events: "EVENT_LOOKUP",
+  papers: "PAPER_LOOKUP",
 };
 
 export const eventInputSchema = z.object({
@@ -232,6 +235,15 @@ export const FIELD_LABELS: Record<string, string> = {
   linkedin: "LinkedIn",
   github: "GitHub",
   contact_page: "Contact page",
+  prize_pool: "Prize pool",
+  dates: "Dates",
+  paper_title: "Paper title",
+  authors: "Authors",
+  venue: "Venue",
+  year: "Year",
+  topic: "Topic",
+  pdf_url: "PDF Link",
+  citations: "Citations",
 };
 
 export function fieldLabel(field: string): string {
@@ -242,14 +254,15 @@ export const INTENT_LABELS: Record<IntentId, string> = {
   SPONSOR_LOOKUP: "Sponsor lookup",
   JOB_LOOKUP: "Job lookup",
   LEAD_LOOKUP: "Lead lookup",
-  EVENT_LOOKUP: "Event lookup",
+  EVENT_LOOKUP: "Hackathons & Events",
   COMPANY_LOOKUP: "Company lookup",
   COMPETITOR_LOOKUP: "Competitor lookup",
   PRODUCT_LOOKUP: "Product lookup",
   MARKET_LOOKUP: "Market lookup",
   FUNDING_LOOKUP: "Funding lookup",
   VENDOR_LOOKUP: "Vendor lookup",
-  JUDGE_LOOKUP: "Judges, Mentors & Speakers",
+  JUDGE_LOOKUP: "Judges, Mentors & Researchers",
+  PAPER_LOOKUP: "Research Papers",
 };
 
 export function stateLabel(state: JobState): string {

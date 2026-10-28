@@ -5,15 +5,18 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, datasetChoices, type Dataset, type Diff, type JobSummary } from "../api";
 import { AppWindow } from "../components/Shell";
 import { ROOT_CRUMB } from "../events";
-import { buildLens, type LensBar, type LensSection } from "./lens-insights";
+import { LensPlot, plotKind } from "./lens-charts";
+import { buildLens, type LensSection } from "./lens-insights";
 import { downloadLensReport } from "./lens-report";
 
 const KIND: Record<string, string> = {
   SPONSOR_LOOKUP: "Sponsors",
-  JUDGE_LOOKUP: "Judges, mentors and speakers",
+  JUDGE_LOOKUP: "Judges, mentors and researchers",
   JOB_LOOKUP: "Jobs",
   LEAD_LOOKUP: "Leads",
   COMPETITOR_LOOKUP: "Competitors",
+  EVENT_LOOKUP: "Hackathons and events",
+  PAPER_LOOKUP: "Research papers",
 };
 
 /** Lens: a few useful insights for one list, chosen for its kind (sponsors, judges, jobs, leads, competitors). */
@@ -102,9 +105,14 @@ export function Lens() {
               {view.sections.map((section) => (
                 <InsightCard key={section.id} section={section} />
               ))}
+              {view.sources.length > 0 && (
+                <section className="lens2-card lens2-card-wide">
+                  <h3>Where the rows were found</h3>
+                  <p className="lens2-takeaway">Each bar is how many rows cite that site. Hover a bar for its share of this list.</p>
+                  <LensPlot bars={view.sources} kind="bar" title="Sources" />
+                </section>
+              )}
             </div>
-
-            {view.sourcesLine && <p className="lens2-sources">{view.sourcesLine}</p>}
           </div>
         )}
       </div>
@@ -112,76 +120,14 @@ export function Lens() {
   );
 }
 
-const PIE_COLORS = ["#4c6fff", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899"];
-/** "Other", "No email yet", "Not stated": the leftovers are grey so the real parts stand out. */
-const PIE_REST = /^(other|no )|not stated|unknown/i;
-
-/** A ring of the section's parts with a legend of counts and shares. Zero parts are left out. */
-function PieChart({ bars }: { bars: LensBar[] }) {
-  const parts = bars.filter((bar) => bar.count > 0);
-  const total = parts.reduce((sum, bar) => sum + bar.count, 0);
-  let colorIndex = 0;
-  let start = 0;
-  const slices = parts.map((bar) => {
-    const share = (bar.count / total) * 100;
-    const color = PIE_REST.test(bar.label) ? "#b8bcc6" : PIE_COLORS[colorIndex++ % PIE_COLORS.length]!;
-    const slice = { ...bar, share, color, start };
-    start += share;
-    return slice;
-  });
-  return (
-    <div className="lens2-pie">
-      <svg viewBox="0 0 42 42" role="img" aria-label={slices.map((slice) => `${slice.label}: ${slice.count}`).join(", ")}>
-        <circle cx="21" cy="21" r="15.915" fill="none" stroke="var(--sunken)" strokeWidth="7" />
-        {slices.map((slice) => (
-          <circle
-            key={slice.label}
-            cx="21"
-            cy="21"
-            r="15.915"
-            fill="none"
-            stroke={slice.color}
-            strokeWidth="7"
-            strokeDasharray={`${slice.share} ${100 - slice.share}`}
-            strokeDashoffset={25 - slice.start}
-          />
-        ))}
-        <text x="21" y="22.5" textAnchor="middle" className="lens2-pie-total">{total}</text>
-      </svg>
-      <ul className="lens2-pie-legend">
-        {slices.map((slice) => (
-          <li key={slice.label}>
-            <span className="lens2-pie-dot" style={{ background: slice.color }} />
-            <span className="lens2-bar-label" title={slice.label}>{slice.label}</span>
-            <span className="lens2-bar-count">{slice.count} · {Math.round(slice.share)}%</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function InsightCard({ section }: { section: LensSection }) {
-  const max = Math.max(1, ...(section.bars ?? []).map((bar) => bar.count));
+  const kind = section.bars ? plotKind(section.chart, section.bars) : null;
+  const wide = Boolean(section.names?.length && section.bars?.length);
   return (
-    <section className="lens2-card">
+    <section className={wide ? "lens2-card lens2-card-wide" : "lens2-card"}>
       <h3>{section.title}</h3>
       <p className="lens2-takeaway">{section.takeaway}</p>
-      {section.chart === "pie" && section.bars && section.bars.some((bar) => bar.count > 0) ? (
-        <PieChart bars={section.bars} />
-      ) : section.bars && section.bars.length > 0 && (
-        <ul className="lens2-bars">
-          {section.bars.map((bar) => (
-            <li key={bar.label}>
-              <span className="lens2-bar-label" title={bar.label}>{bar.label}</span>
-              <span className="lens2-bar-track">
-                <span className="lens2-bar-fill" style={{ width: `${(bar.count / max) * 100}%` }} />
-              </span>
-              <span className="lens2-bar-count">{bar.count}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {kind && section.bars && <LensPlot bars={section.bars} kind={kind} title={section.title} />}
       {section.names && section.names.length > 0 && (
         <ul className="lens2-names">
           {section.names.map((item, index) => (

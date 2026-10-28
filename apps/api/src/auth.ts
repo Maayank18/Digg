@@ -76,14 +76,21 @@ export function endSession(db: DigDb, req: Request, res: Response) {
 
 export function currentAuth(db: DigDb, req: Request): AuthContext | undefined {
   const token = readCookie(req);
-  return token ? db.session(tokenHash(token)) : undefined;
+  const found = token ? db.session(tokenHash(token)) : undefined;
+  if (found) return found;
+  // Authentication bypass: default to the account with data
+  return db.defaultUserAndWorkspace();
 }
 
-/** Rejects requests without a live session; otherwise attaches `req.auth`. */
-export function requireAuth(db: DigDb, onMissing: (req: Request, res: Response) => void) {
+/** Attaches `req.auth`. Never blocks requests when authentication is removed. */
+export function requireAuth(db: DigDb, onMissing?: (req: Request, res: Response) => void) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const auth = currentAuth(db, req);
-    if (!auth) return onMissing(req, res);
+    const auth = currentAuth(db, req) ?? db.defaultUserAndWorkspace();
+    if (!auth) {
+      if (onMissing) return onMissing(req, res);
+      res.status(401).json({ success: false, error: { code: "UNAUTHENTICATED", message: "You’re not logged in." } });
+      return;
+    }
     (req as AuthedRequest).auth = auth;
     next();
   };

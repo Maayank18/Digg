@@ -24,6 +24,7 @@ export interface LensSection {
 export interface LensView {
   stats: Array<{ label: string; value: string }>;
   sections: LensSection[];
+  sources: LensBar[];
   sourcesLine: string;
 }
 
@@ -47,7 +48,7 @@ function emailOf(record: DatasetRecord): string {
 
 function nameOf(record: DatasetRecord): string {
   const f = record.fields;
-  return f.person_name || f.company_name || f.role_title || record.label || "Unnamed";
+  return f.paper_title || f.event_name || f.person_name || f.company_name || f.role_title || record.label || "Unnamed";
 }
 
 function clip(text: string, max = 42): string {
@@ -399,15 +400,90 @@ function competitorSections(records: DatasetRecord[]): LensSection[] {
   ];
 }
 
-function sourcesLine(records: DatasetRecord[]): string {
+function eventSections(records: DatasetRecord[]): LensSection[] {
+  const withPrize = records.filter((r) => r.fields.prize_pool?.trim());
+  const organizers = barsOrNames(records, "organizer");
+  const modes = tally(
+    records.map((r) => {
+      const loc = (r.fields.location || "").toLowerCase();
+      if (loc.includes("online") || loc.includes("virtual")) return "Online / Virtual";
+      if (loc.includes("hybrid")) return "Hybrid";
+      if (loc) return "In-person";
+      return "Unspecified";
+    }),
+  );
+  return [
+    {
+      id: "prizes",
+      title: "Prize pool & rewards",
+      takeaway: withPrize.length
+        ? `${withPrize.length} of ${records.length} hackathons have verified prize money or bounties listed.`
+        : "No explicit prize pool amounts were verified on the pages found.",
+      names: withPrize.slice(0, 8).map((r) => ({ name: nameOf(r), detail: r.fields.prize_pool })),
+    },
+    {
+      id: "modes",
+      title: "Event format",
+      takeaway: "Distribution of in-person, virtual, and hybrid hackathons.",
+      bars: modes,
+      chart: "pie",
+    },
+    {
+      id: "organizers",
+      title: "Organizers & hosts",
+      takeaway: organizers.repeats && organizers.bars?.[0]
+        ? `Most frequent organizer: ${organizers.bars[0].label} (${organizers.bars[0].count}).`
+        : "Organizing entities and host platforms.",
+      bars: organizers.bars,
+      names: organizers.names,
+    },
+  ];
+}
+
+function paperSections(records: DatasetRecord[]): LensSection[] {
+  const withPdf = records.filter((r) => r.fields.pdf_url?.trim());
+  const venues = barsOrNames(records, "venue");
+  const years = tally(records.map((r) => r.fields.year?.trim()).filter(Boolean) as string[], 5);
+  return [
+    {
+      id: "downloads",
+      title: "Open access & direct PDFs",
+      takeaway: `${withPdf.length} of ${records.length} research papers have direct downloadable PDF links.`,
+      names: withPdf.slice(0, 8).map((r) => ({
+        name: nameOf(r),
+        detail: r.fields.venue ? `${r.fields.venue}${r.fields.year ? ` · ${r.fields.year}` : ""}` : r.fields.year || "PDF available",
+      })),
+    },
+    {
+      id: "venues",
+      title: "Conferences & archives",
+      takeaway: venues.repeats && venues.bars?.[0]
+        ? `Top publication venue: ${venues.bars[0].label} (${venues.bars[0].count}).`
+        : "Journals, conferences and preprint archives.",
+      bars: venues.bars,
+      names: venues.names,
+    },
+    {
+      id: "years",
+      title: "Publication timeline",
+      takeaway: "Distribution of papers across publication years.",
+      bars: years,
+      chart: "pie",
+    },
+  ];
+}
+
+function sourceBars(records: DatasetRecord[]): LensBar[] {
   const counts = new Map<string, number>();
   for (const record of records) {
     for (const domain of new Set((record.sources ?? []).map((source) => source.domain || ""))) {
       if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
     }
   }
-  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  return top.length ? `Top sources: ${top.map(([domain, count]) => `${domain} (${count})`).join(" · ")}` : "";
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 6)
+    .map(([label, count]) => ({ label, count }));
 }
 
 export function buildLens(input: {
@@ -420,11 +496,27 @@ export function buildLens(input: {
   const withEmail = records.filter((record) => emailOf(record)).length;
   const withLinkedin = records.filter((record) => record.fields.linkedin?.trim()).length;
   const contacted = records.filter((record) => outreachOf(record, outreach) !== "pending").length;
+  const isDocOrEvent = intent === "EVENT_LOOKUP" || intent === "PAPER_LOOKUP";
+  const withWeb = records.filter((r) => r.fields.website?.trim() || r.fields.pdf_url?.trim()).length;
   const stats = [
-    { label: "Rows", value: String(records.length) },
-    { label: "With email", value: String(withEmail) },
-    { label: "With LinkedIn", value: String(withLinkedin) },
-    ...(intent === "COMPETITOR_LOOKUP" ? [] : [{ label: "Contacted", value: String(contacted) }]),
+    { label: intent === "PAPER_LOOKUP" ? "Papers" : intent === "EVENT_LOOKUP" ? "Events" : "Rows", value: String(records.length) },
+    ...(isDocOrEvent
+      ? [
+          {
+            label: intent === "PAPER_LOOKUP" ? "With direct PDF" : "With prize pool",
+            value: String(
+              intent === "PAPER_LOOKUP"
+                ? records.filter((r) => r.fields.pdf_url?.trim()).length
+                : records.filter((r) => r.fields.prize_pool?.trim()).length,
+            ),
+          },
+          { label: "With official link", value: String(withWeb) },
+        ]
+      : [
+          { label: "With email", value: String(withEmail) },
+          { label: "With LinkedIn", value: String(withLinkedin) },
+        ]),
+    ...(intent === "COMPETITOR_LOOKUP" || isDocOrEvent ? [] : [{ label: "Contacted", value: String(contacted) }]),
   ];
   const specific =
     intent === "SPONSOR_LOOKUP" ? sponsorSections(records, outreach)
@@ -432,11 +524,15 @@ export function buildLens(input: {
         : intent === "JOB_LOOKUP" ? jobSections(records)
           : intent === "LEAD_LOOKUP" ? leadSections(records, outreach)
             : intent === "COMPETITOR_LOOKUP" ? competitorSections(records)
-              : [];
+              : intent === "EVENT_LOOKUP" ? eventSections(records)
+                : intent === "PAPER_LOOKUP" ? paperSections(records)
+                  : [];
   const sections = [
-    ...(intent === "COMPETITOR_LOOKUP" ? [] : [outreachSection(records, outreach)]),
+    ...(intent === "COMPETITOR_LOOKUP" || isDocOrEvent ? [] : [outreachSection(records, outreach)]),
     ...specific,
     ...[changesSection(diff)].filter((section): section is LensSection => Boolean(section)),
   ];
-  return { stats, sections, sourcesLine: sourcesLine(records) };
+  const sources = sourceBars(records);
+  const sourcesLine = sources.length ? `Top sources: ${sources.map((item) => `${item.label} (${item.count})`).join(" · ")}` : "";
+  return { stats, sections, sources, sourcesLine };
 }

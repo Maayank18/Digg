@@ -1,4 +1,4 @@
-import { CalendarCheck, Layers, ScanSearch, Workflow, X } from "lucide-react";
+import { CalendarCheck, Layers, ScanSearch, Trophy, Workflow, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -26,6 +26,7 @@ const TOOLS: Array<{ icon: ReactNode; name: string; line: string }> = [
   { icon: <ScanSearch size={16} />, name: "Lens", line: "See what a list is telling you." },
   { icon: <Layers size={16} />, name: "Merger", line: "Combine lists into one spreadsheet." },
   { icon: <Workflow size={16} />, name: "Flow", line: "Sketch an outreach plan. A prototype for now." },
+  { icon: <Trophy size={16} />, name: "Gauntlet", line: "Zero missed deadlines: track hackathons & submissions." },
 ];
 
 /** Short intro to Toolkit: picture on the left, four one-liners on the right, two buttons. */

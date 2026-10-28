@@ -24,6 +24,9 @@ export class DigDb {
 
   /** Safe to run on every start: only creates what is missing, never drops or reseeds. */
   migrate() {
+    this.addColumn("gauntlet_hackathons", "room_id", "room_id TEXT");
+    this.addColumn("gauntlet_hackathons", "checklist_json", "checklist_json TEXT NOT NULL DEFAULT '[]'");
+
     const sql = readFileSync(env.schemaPath, "utf8");
     this.db.exec(sql);
     this.addColumn("users", "password_hash", "password_hash TEXT");
@@ -31,12 +34,18 @@ export class DigDb {
     this.addColumn("records", "contactability_json", "contactability_json TEXT");
     this.addColumn("records", "trust_json", "trust_json TEXT");
     this.addColumn("events", "hidden_folders_json", "hidden_folders_json TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("gauntlet_hackathons", "room_id", "room_id TEXT");
+    this.addColumn("gauntlet_hackathons", "checklist_json", "checklist_json TEXT NOT NULL DEFAULT '[]'");
     this.failDangling();
   }
 
   private addColumn(table: string, column: string, ddl: string) {
-    const columns = this.all<{ name: string }>(`PRAGMA table_info(${table})`);
-    if (!columns.some((item) => item.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    try {
+      const columns = this.all<{ name: string }>(`PRAGMA table_info(${table})`);
+      if (columns.length > 0 && !columns.some((item) => item.name === column)) {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      }
+    } catch {}
   }
 
   // ---------------------------------------------------------------------------
@@ -98,6 +107,28 @@ export class DigDb {
       tokenHash,
       new Date().toISOString(),
     );
+    if (!row) return undefined;
+    return {
+      user: { id: row.id, name: row.name, email: row.email, role: row.role },
+      workspace: { id: row.workspace_id, name: row.workspace_name },
+    };
+  }
+
+  /** Returns the primary account where the folders and data exist (Mayank Garg). */
+  defaultUserAndWorkspace() {
+    const row =
+      this.get<{ id: string; name: string; email: string; role: string; workspace_id: string; workspace_name: string }>(
+        `SELECT u.id, u.name, u.email, u.role, w.id AS workspace_id, w.name AS workspace_name
+         FROM users u JOIN workspaces w ON w.owner_id = u.id
+         WHERE u.email = ?`,
+        "maayank51518@gmail.com",
+      ) ??
+      this.get<{ id: string; name: string; email: string; role: string; workspace_id: string; workspace_name: string }>(
+        `SELECT u.id, u.name, u.email, u.role, w.id AS workspace_id, w.name AS workspace_name
+         FROM users u JOIN workspaces w ON w.owner_id = u.id
+         ORDER BY (SELECT COUNT(*) FROM events e WHERE e.user_id = u.id) DESC
+         LIMIT 1`,
+      );
     if (!row) return undefined;
     return {
       user: { id: row.id, name: row.name, email: row.email, role: row.role },
@@ -1452,6 +1483,585 @@ export class DigDb {
       failed: rows.filter((row) => row.status === "FAILED" || row.status === "PARTIAL").reduce((sum, row) => sum + Number(row.n), 0),
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Gauntlet Hackathon Tracker: War-Room cockpit for solo and team hackers.
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Gauntlet Squad War-Rooms & Solo Cockpits
+  // ---------------------------------------------------------------------------
+
+  listGauntletRooms(userId: string, workspaceId?: string): GauntletRoom[] {
+    this.ensurePersonalSoloRoom(userId, workspaceId);
+
+    const rows = this.all<GauntletRoomRow>(
+      `SELECT r.*
+       FROM gauntlet_rooms r
+       WHERE r.owner_id = ? 
+          OR r.members_json LIKE ?
+          OR (? IS NOT NULL AND r.workspace_id = ?)
+       ORDER BY (r.type = 'solo') DESC, r.updated_at DESC`,
+      userId,
+      `%"userId":"${userId}"%`,
+      workspaceId ?? null,
+      workspaceId ?? null,
+    );
+
+    return rows.map((r) => this.mapGauntletRoom(r));
+  }
+
+  ensurePersonalSoloRoom(userId: string, workspaceId?: string): GauntletRoom {
+    const existing = this.get<GauntletRoomRow>(
+      "SELECT * FROM gauntlet_rooms WHERE owner_id = ? AND type = 'solo' LIMIT 1",
+      userId,
+    );
+    if (existing) return this.mapGauntletRoom(existing);
+
+    const id = crypto.randomUUID();
+    const code = `SOLO-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const now = new Date().toISOString();
+    const members = JSON.stringify([
+      { userId, name: "Solo Hacker", role: "Solo Lead", joinedAt: now },
+    ]);
+
+    this.run(
+      `INSERT INTO gauntlet_rooms (id, code, name, type, description, owner_id, workspace_id, members_json, created_at, updated_at)
+       VALUES (?, ?, 'Personal Solo Cockpit', 'solo', 'Private high-velocity focus room for your personal hackathon chases.', ?, ?, ?, ?, ?)`,
+      id,
+      code,
+      userId,
+      workspaceId ?? null,
+      members,
+      now,
+      now,
+    );
+
+    const created = this.get<GauntletRoomRow>("SELECT * FROM gauntlet_rooms WHERE id = ?", id);
+    return this.mapGauntletRoom(created!);
+  }
+
+  getGauntletRoom(idOrCode: string): GauntletRoom | null {
+    const clean = idOrCode.trim();
+    const row = this.get<GauntletRoomRow>(
+      "SELECT * FROM gauntlet_rooms WHERE id = ? OR LOWER(code) = LOWER(?)",
+      clean,
+      clean,
+    );
+    if (!row) return null;
+    return this.mapGauntletRoom(row);
+  }
+
+  createGauntletRoom(input: {
+    name: string;
+    type?: "solo" | "squad";
+    description?: string | null;
+    ownerId: string;
+    workspaceId?: string | null;
+    ownerName: string;
+    ownerRole?: string;
+  }): GauntletRoom {
+    const id = crypto.randomUUID();
+    const prefix = input.type === "solo" ? "SOLO" : "SQUAD";
+    const code = `${prefix}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const now = new Date().toISOString();
+    const members = [
+      {
+        userId: input.ownerId,
+        name: input.ownerName || "Squad Captain",
+        role: input.ownerRole || "Squad Captain / Lead",
+        joinedAt: now,
+      },
+    ];
+
+    this.run(
+      `INSERT INTO gauntlet_rooms (id, code, name, type, description, owner_id, workspace_id, members_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      code,
+      input.name.trim(),
+      input.type || "squad",
+      input.description?.trim() || null,
+      input.ownerId,
+      input.workspaceId ?? null,
+      JSON.stringify(members),
+      now,
+      now,
+    );
+
+    const row = this.get<GauntletRoomRow>("SELECT * FROM gauntlet_rooms WHERE id = ?", id);
+    return this.mapGauntletRoom(row!);
+  }
+
+  joinGauntletRoom(
+    code: string,
+    user: { id: string; name: string; role?: string; email?: string },
+  ): GauntletRoom | null {
+    const room = this.getGauntletRoom(code);
+    if (!room) return null;
+
+    const members = [...room.members];
+    const existingIndex = members.findIndex(
+      (m) => (m.userId && m.userId === user.id) || (m.name.toLowerCase() === user.name.toLowerCase()),
+    );
+
+    const now = new Date().toISOString();
+    if (existingIndex >= 0) {
+      members[existingIndex] = {
+        ...members[existingIndex]!,
+        userId: user.id,
+        role: user.role || members[existingIndex]!.role,
+      };
+    } else {
+      members.push({
+        userId: user.id,
+        name: user.name || "Teammate",
+        role: user.role || "Developer",
+        email: user.email,
+        joinedAt: now,
+      });
+    }
+
+    this.run(
+      "UPDATE gauntlet_rooms SET members_json = ?, updated_at = ? WHERE id = ?",
+      JSON.stringify(members),
+      now,
+      room.id,
+    );
+
+    return this.getGauntletRoom(room.id);
+  }
+
+  deleteGauntletRoom(roomId: string, userId: string): boolean {
+    const room = this.get<GauntletRoomRow>("SELECT * FROM gauntlet_rooms WHERE id = ?", roomId);
+    if (!room || room.owner_id !== userId) return false;
+
+    const hackathons = this.all<{ id: string }>("SELECT id FROM gauntlet_hackathons WHERE room_id = ?", roomId);
+    for (const h of hackathons) {
+      this.run("DELETE FROM gauntlet_updates WHERE hackathon_id = ?", h.id);
+    }
+    this.run("DELETE FROM gauntlet_hackathons WHERE room_id = ?", roomId);
+    this.run("DELETE FROM gauntlet_rooms WHERE id = ?", roomId);
+    return true;
+  }
+
+  updateGauntletRoom(
+    roomId: string,
+    userId: string,
+    input: { name?: string; description?: string | null; type?: "solo" | "squad" },
+  ): GauntletRoom | null {
+    const room = this.get<GauntletRoomRow>("SELECT * FROM gauntlet_rooms WHERE id = ?", roomId);
+    if (!room || room.owner_id !== userId) return null;
+
+    const name = input.name !== undefined ? input.name.trim() : room.name;
+    const description =
+      input.description !== undefined
+        ? input.description ? input.description.trim() : null
+        : room.description;
+    const type = input.type !== undefined ? input.type : room.type;
+    const now = new Date().toISOString();
+
+    this.run(
+      "UPDATE gauntlet_rooms SET name = ?, description = ?, type = ?, updated_at = ? WHERE id = ?",
+      name,
+      description,
+      type,
+      now,
+      roomId,
+    );
+
+    return this.getGauntletRoom(roomId);
+  }
+
+  private mapGauntletRoom(row: GauntletRoomRow): GauntletRoom {
+    let members: GauntletMember[] = [];
+    try {
+      members = JSON.parse(row.members_json ?? "[]");
+    } catch {
+      members = [];
+    }
+
+    const hackathonRows = this.all<{ id: string; checklist_json: string }>(
+      "SELECT id, checklist_json FROM gauntlet_hackathons WHERE room_id = ?",
+      row.id,
+    );
+
+    let completedTasksCount = 0;
+    let totalTasksCount = 0;
+    for (const h of hackathonRows) {
+      try {
+        const items = JSON.parse(h.checklist_json || "[]") as GauntletChecklistItem[];
+        totalTasksCount += items.length;
+        completedTasksCount += items.filter((item) => item.done).length;
+      } catch {}
+    }
+
+    return {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      type: (row.type === "solo" ? "solo" : "squad") as "solo" | "squad",
+      description: row.description,
+      ownerId: row.owner_id,
+      workspaceId: row.workspace_id,
+      members,
+      hackathonsCount: hackathonRows.length,
+      completedTasksCount,
+      totalTasksCount,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hackathon Cards & Follow-Ups
+  // ---------------------------------------------------------------------------
+
+  listGauntletHackathons(userId: string, roomId?: string | null, workspaceId?: string): GauntletHackathon[] {
+    let query = `
+      SELECT h.*,
+        (SELECT COUNT(*) FROM gauntlet_updates u WHERE u.hackathon_id = h.id) AS updates_count,
+        (SELECT body FROM gauntlet_updates u WHERE u.hackathon_id = h.id ORDER BY u.created_at DESC LIMIT 1) AS latest_body,
+        (SELECT badge FROM gauntlet_updates u WHERE u.hackathon_id = h.id ORDER BY u.created_at DESC LIMIT 1) AS latest_badge,
+        (SELECT author_name FROM gauntlet_updates u WHERE u.hackathon_id = h.id ORDER BY u.created_at DESC LIMIT 1) AS latest_author,
+        (SELECT created_at FROM gauntlet_updates u WHERE u.hackathon_id = h.id ORDER BY u.created_at DESC LIMIT 1) AS latest_created_at
+       FROM gauntlet_hackathons h
+    `;
+    const params: any[] = [];
+
+    if (roomId) {
+      query += ` WHERE h.room_id = ? ORDER BY h.updated_at DESC`;
+      params.push(roomId);
+    } else {
+      query += ` WHERE (h.user_id = ? OR (? IS NOT NULL AND h.workspace_id = ?)) ORDER BY h.updated_at DESC`;
+      params.push(userId, workspaceId ?? null, workspaceId ?? null);
+    }
+
+    const rows = this.all<GauntletHackathonRow & {
+      updates_count: number;
+      latest_body: string | null;
+      latest_badge: string | null;
+      latest_author: string | null;
+      latest_created_at: string | null;
+    }>(query, ...params);
+
+    return rows.map((r) => mapGauntletHackathon(r));
+  }
+
+  getGauntletHackathon(id: string, userId: string): (GauntletHackathon & { updates: GauntletUpdate[] }) | null {
+    const row = this.get<GauntletHackathonRow>(
+      "SELECT * FROM gauntlet_hackathons WHERE id = ? AND (user_id = ? OR room_id IN (SELECT id FROM gauntlet_rooms))",
+      id,
+      userId,
+    );
+    if (!row) return null;
+    const updates = this.listGauntletUpdates(id);
+    return {
+      ...mapGauntletHackathon(row),
+      updates,
+    };
+  }
+
+  createGauntletHackathon(
+    userId: string,
+    input: {
+      workspaceId?: string | null;
+      roomId?: string | null;
+      name: string;
+      phase?: string;
+      targetDate?: string | null;
+      submitDeadline?: string | null;
+      roundDate?: string | null;
+      prizePool?: string | null;
+      organizer?: string | null;
+      registrar?: string | null;
+      track?: string | null;
+      link?: string | null;
+      repoUrl?: string | null;
+      deckUrl?: string | null;
+      demoUrl?: string | null;
+      submissionUrl?: string | null;
+      registrantsCount?: number;
+      registrantsAsOf?: string | null;
+      teammates?: Array<{ name: string; role: string; email?: string }>;
+      checklist?: GauntletChecklistItem[];
+      tags?: string[];
+      notes?: string | null;
+    },
+  ): GauntletHackathon {
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const phase = input.phase ?? "targeting";
+
+    // Auto-populate default follow-up checklist if none provided
+    const checklist = input.checklist && input.checklist.length > 0 ? input.checklist : defaultGauntletChecklist(input);
+
+    this.run(
+      `INSERT INTO gauntlet_hackathons (
+        id, user_id, workspace_id, room_id, name, phase, target_date, submit_deadline, round_date,
+        prize_pool, organizer, registrar, track, link, repo_url, deck_url, demo_url,
+        submission_url, registrants_count, registrants_as_of, teammates_json, checklist_json, tags_json, notes, results,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+      id,
+      userId,
+      input.workspaceId ?? null,
+      input.roomId ?? null,
+      input.name,
+      phase,
+      input.targetDate ?? null,
+      input.submitDeadline ?? null,
+      input.roundDate ?? null,
+      input.prizePool ?? null,
+      input.organizer ?? null,
+      input.registrar ?? null,
+      input.track ?? null,
+      input.link ?? null,
+      input.repoUrl ?? null,
+      input.deckUrl ?? null,
+      input.demoUrl ?? null,
+      input.submissionUrl ?? null,
+      input.registrantsCount ?? 0,
+      input.registrantsAsOf ?? now,
+      JSON.stringify(input.teammates ?? []),
+      JSON.stringify(checklist),
+      JSON.stringify(input.tags ?? []),
+      input.notes ?? null,
+      now,
+      now,
+    );
+    const item = this.getGauntletHackathon(id, userId);
+    return item!;
+  }
+
+  updateGauntletHackathon(
+    id: string,
+    userId: string,
+    patch: Partial<{
+      roomId: string | null;
+      name: string;
+      phase: string;
+      targetDate: string | null;
+      submitDeadline: string | null;
+      roundDate: string | null;
+      prizePool: string | null;
+      organizer: string | null;
+      registrar: string | null;
+      track: string | null;
+      link: string | null;
+      repoUrl: string | null;
+      deckUrl: string | null;
+      demoUrl: string | null;
+      submissionUrl: string | null;
+      registrantsCount: number;
+      registrantsAsOf: string | null;
+      teammates: Array<{ name: string; role: string; email?: string }>;
+      checklist: GauntletChecklistItem[];
+      tags: string[];
+      notes: string | null;
+      results: string | null;
+    }>,
+  ): GauntletHackathon | null {
+    const existing = this.getGauntletHackathon(id, userId);
+    if (!existing) return null;
+    const now = new Date().toISOString();
+
+    const roomId = patch.roomId !== undefined ? patch.roomId : existing.roomId;
+    const name = patch.name !== undefined ? patch.name : existing.name;
+    const phase = patch.phase !== undefined ? patch.phase : existing.phase;
+    const targetDate = patch.targetDate !== undefined ? patch.targetDate : existing.targetDate;
+    const submitDeadline = patch.submitDeadline !== undefined ? patch.submitDeadline : existing.submitDeadline;
+    const roundDate = patch.roundDate !== undefined ? patch.roundDate : existing.roundDate;
+    const prizePool = patch.prizePool !== undefined ? patch.prizePool : existing.prizePool;
+    const organizer = patch.organizer !== undefined ? patch.organizer : existing.organizer;
+    const registrar = patch.registrar !== undefined ? patch.registrar : existing.registrar;
+    const track = patch.track !== undefined ? patch.track : existing.track;
+    const link = patch.link !== undefined ? patch.link : existing.link;
+    const repoUrl = patch.repoUrl !== undefined ? patch.repoUrl : existing.repoUrl;
+    const deckUrl = patch.deckUrl !== undefined ? patch.deckUrl : existing.deckUrl;
+    const demoUrl = patch.demoUrl !== undefined ? patch.demoUrl : existing.demoUrl;
+    const submissionUrl = patch.submissionUrl !== undefined ? patch.submissionUrl : existing.submissionUrl;
+    const registrantsCount = patch.registrantsCount !== undefined ? patch.registrantsCount : existing.registrantsCount;
+    const registrantsAsOf = patch.registrantsAsOf !== undefined ? patch.registrantsAsOf : existing.registrantsAsOf;
+    const teammatesJson = patch.teammates !== undefined ? JSON.stringify(patch.teammates) : JSON.stringify(existing.teammates);
+    const checklistJson = patch.checklist !== undefined ? JSON.stringify(patch.checklist) : JSON.stringify(existing.checklist);
+    const tagsJson = patch.tags !== undefined ? JSON.stringify(patch.tags) : JSON.stringify(existing.tags);
+    const notes = patch.notes !== undefined ? patch.notes : existing.notes;
+    const results = patch.results !== undefined ? patch.results : existing.results;
+
+    this.run(
+      `UPDATE gauntlet_hackathons SET
+        room_id = ?,
+        name = ?,
+        phase = ?,
+        target_date = ?,
+        submit_deadline = ?,
+        round_date = ?,
+        prize_pool = ?,
+        organizer = ?,
+        registrar = ?,
+        track = ?,
+        link = ?,
+        repo_url = ?,
+        deck_url = ?,
+        demo_url = ?,
+        submission_url = ?,
+        registrants_count = ?,
+        registrants_as_of = ?,
+        teammates_json = ?,
+        checklist_json = ?,
+        tags_json = ?,
+        notes = ?,
+        results = ?,
+        updated_at = ?
+       WHERE id = ?`,
+      roomId,
+      name,
+      phase,
+      targetDate,
+      submitDeadline,
+      roundDate,
+      prizePool,
+      organizer,
+      registrar,
+      track,
+      link,
+      repoUrl,
+      deckUrl,
+      demoUrl,
+      submissionUrl,
+      registrantsCount,
+      registrantsAsOf,
+      teammatesJson,
+      checklistJson,
+      tagsJson,
+      notes,
+      results,
+      now,
+      id,
+    );
+    return this.getGauntletHackathon(id, userId);
+  }
+
+  updateGauntletChecklist(hackathonId: string, checklist: GauntletChecklistItem[]): GauntletHackathon | null {
+    const existing = this.get<GauntletHackathonRow>("SELECT * FROM gauntlet_hackathons WHERE id = ?", hackathonId);
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    this.run(
+      "UPDATE gauntlet_hackathons SET checklist_json = ?, updated_at = ? WHERE id = ?",
+      JSON.stringify(checklist),
+      now,
+      hackathonId,
+    );
+    const updated = this.get<GauntletHackathonRow>("SELECT * FROM gauntlet_hackathons WHERE id = ?", hackathonId);
+    return mapGauntletHackathon(updated!);
+  }
+
+  deleteGauntletHackathon(id: string, userId: string): boolean {
+    this.run("DELETE FROM gauntlet_updates WHERE hackathon_id = ?", id);
+    this.run("DELETE FROM gauntlet_hackathons WHERE id = ?", id);
+    return true;
+  }
+
+  addGauntletUpdate(
+    hackathonId: string,
+    userId: string,
+    authorName: string,
+    body: string,
+    badge: string = "update",
+  ): GauntletUpdate | null {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.run(
+      "INSERT INTO gauntlet_updates (id, hackathon_id, user_id, author_name, body, badge, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      id,
+      hackathonId,
+      userId,
+      authorName,
+      body,
+      badge,
+      now,
+    );
+    this.run("UPDATE gauntlet_hackathons SET updated_at = ? WHERE id = ?", now, hackathonId);
+    return {
+      id,
+      hackathonId,
+      userId,
+      authorName,
+      body,
+      badge: (["update", "blocker", "milestone", "submission"].includes(badge) ? badge : "update") as any,
+      createdAt: now,
+    };
+  }
+
+  listGauntletUpdates(hackathonId: string): GauntletUpdate[] {
+    const rows = this.all<GauntletUpdateRow>(
+      "SELECT * FROM gauntlet_updates WHERE hackathon_id = ? ORDER BY created_at DESC",
+      hackathonId,
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      hackathonId: r.hackathon_id,
+      userId: r.user_id,
+      authorName: r.author_name,
+      body: r.body,
+      badge: (["update", "blocker", "milestone", "submission"].includes(r.badge) ? r.badge : "update") as any,
+      createdAt: r.created_at,
+    }));
+  }
+
+  listAvailableEventHackathons(workspaceId: string, userId: string) {
+    const jobs = this.all<{ id: string; name: string }>(
+      "SELECT id, name FROM jobs WHERE workspace_id = ? AND intent = 'EVENT_LOOKUP' AND archived = 0 ORDER BY updated_at DESC",
+      workspaceId,
+    );
+    const userEvents = this.listEvents(userId);
+    const jobToEventMap = new Map<string, string>();
+    for (const ev of userEvents) {
+      for (const [, jId] of Object.entries(ev.jobs)) {
+        jobToEventMap.set(jId, ev.name);
+      }
+    }
+
+    const results: Array<{
+      name: string;
+      organizer: string;
+      dates: string;
+      prizePool: string;
+      website: string;
+      track: string;
+      jobId: string;
+      searchName: string;
+      mainPanelEvent: string | null;
+    }> = [];
+    const seenNames = new Set<string>();
+
+    for (const job of jobs) {
+      const version = this.latestVersion(job.id);
+      if (!version) continue;
+      const records = this.recordsForVersion(version.id);
+      const mainPanelEvent = jobToEventMap.get(job.id) || null;
+
+      for (const rec of records) {
+        const f = rec.fields;
+        const name = (f.event_name || f.company_name || rec.canonicalEntityId || "").trim();
+        if (!name || seenNames.has(name.toLowerCase())) continue;
+        seenNames.add(name.toLowerCase());
+        results.push({
+          name,
+          organizer: f.organizer || "Community Host",
+          dates: f.dates || "",
+          prizePool: f.prize_pool || "",
+          website: f.website || rec.sources[0]?.url || "",
+          track: f.description || "",
+          jobId: job.id,
+          searchName: job.name,
+          mainPanelEvent,
+        });
+      }
+    }
+    return results;
+  }
 }
 
 interface JobRow {
@@ -1688,7 +2298,287 @@ export function labelFromFields(json: unknown) {
 
 export function labelOf(fields: Record<string, string>) {
   const f = fields;
+  if (f.paper_title) return f.paper_title;
   if (f.person_name) return f.person_name;
   if (f.role_title) return f.company_name ? `${f.role_title} — ${f.company_name}` : f.role_title;
   return f.company_name || f.event_name || f.program_name || f.product_name || f.segment || "Record";
 }
+
+export interface GauntletMember {
+  userId?: string;
+  name: string;
+  role: string;
+  email?: string;
+  joinedAt: string;
+}
+
+export interface GauntletRoomRow {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  description: string | null;
+  owner_id: string;
+  workspace_id: string | null;
+  members_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GauntletRoom {
+  id: string;
+  code: string;
+  name: string;
+  type: "solo" | "squad";
+  description: string | null;
+  ownerId: string;
+  workspaceId: string | null;
+  members: GauntletMember[];
+  hackathonsCount: number;
+  completedTasksCount: number;
+  totalTasksCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GauntletChecklistItem {
+  id: string;
+  text: string;
+  title?: string;
+  done: boolean;
+  completed?: boolean;
+  assignee?: string;
+  assignedTo?: string;
+  completedAt?: string | null;
+  mandatory?: boolean;
+}
+
+export function defaultGauntletChecklist(hackathon: { link?: string | null; track?: string | null; deckUrl?: string | null; repoUrl?: string | null; demoUrl?: string | null; submissionUrl?: string | null }): GauntletChecklistItem[] {
+  return [
+    {
+      id: "reg",
+      text: "Register team or solo entry on event portal",
+      title: "Register team or solo entry on event portal",
+      done: Boolean(hackathon.link?.trim()),
+      completed: Boolean(hackathon.link?.trim()),
+      mandatory: true,
+    },
+    {
+      id: "track",
+      text: "Select official problem statement and challenge track",
+      title: "Select official problem statement and challenge track",
+      done: Boolean(hackathon.track?.trim()),
+      completed: Boolean(hackathon.track?.trim()),
+      mandatory: true,
+    },
+    {
+      id: "deck",
+      text: "Draft and finalize Slide Deck / Pitch PPT",
+      title: "Draft and finalize Slide Deck / Pitch PPT",
+      done: Boolean(hackathon.deckUrl?.trim()),
+      completed: Boolean(hackathon.deckUrl?.trim()),
+      mandatory: true,
+    },
+    {
+      id: "repo",
+      text: "Initialize GitHub repository and push MVP code",
+      title: "Initialize GitHub repository and push MVP code",
+      done: Boolean(hackathon.repoUrl?.trim()),
+      completed: Boolean(hackathon.repoUrl?.trim()),
+      mandatory: true,
+    },
+    {
+      id: "demo",
+      text: "Record & verify 2-minute demo video (Loom/YouTube)",
+      title: "Record & verify 2-minute demo video (Loom/YouTube)",
+      done: Boolean(hackathon.demoUrl?.trim()),
+      completed: Boolean(hackathon.demoUrl?.trim()),
+      mandatory: true,
+    },
+    {
+      id: "submit",
+      text: "Pre-flight verification & submit project on portal before deadline",
+      title: "Pre-flight verification & submit project on portal before deadline",
+      done: Boolean(hackathon.submissionUrl?.trim()),
+      completed: Boolean(hackathon.submissionUrl?.trim()),
+      mandatory: true,
+    },
+  ];
+}
+
+export interface GauntletHackathonRow {
+  id: string;
+  user_id: string;
+  workspace_id: string | null;
+  room_id: string | null;
+  name: string;
+  phase: string;
+  target_date: string | null;
+  submit_deadline: string | null;
+  round_date: string | null;
+  prize_pool: string | null;
+  organizer: string | null;
+  registrar: string | null;
+  track: string | null;
+  link: string | null;
+  repo_url: string | null;
+  deck_url: string | null;
+  demo_url: string | null;
+  submission_url: string | null;
+  registrants_count: number;
+  registrants_as_of: string | null;
+  teammates_json: string;
+  checklist_json: string;
+  tags_json: string;
+  notes: string | null;
+  results: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GauntletUpdateRow {
+  id: string;
+  hackathon_id: string;
+  user_id: string;
+  author_name: string;
+  body: string;
+  badge: string;
+  created_at: string;
+}
+
+export interface GauntletHackathon {
+  id: string;
+  userId: string;
+  workspaceId: string | null;
+  roomId: string | null;
+  name: string;
+  phase: "targeting" | "ideation" | "hacking" | "demo" | "won";
+  targetDate: string | null;
+  submitDeadline: string | null;
+  roundDate: string | null;
+  prizePool: string | null;
+  organizer: string | null;
+  registrar: string | null;
+  track: string | null;
+  link: string | null;
+  repoUrl: string | null;
+  deckUrl: string | null;
+  demoUrl: string | null;
+  submissionUrl: string | null;
+  registrantsCount: number;
+  registrantsAsOf: string | null;
+  teammates: Array<{ name: string; role: string; email?: string }>;
+  checklist: GauntletChecklistItem[];
+  tags: string[];
+  notes: string | null;
+  results: string | null;
+  createdAt: string;
+  updatedAt: string;
+  updatesCount?: number;
+  latestUpdate?: GauntletUpdate | null;
+  readinessScore?: number;
+}
+
+export interface GauntletUpdate {
+  id: string;
+  hackathonId: string;
+  userId: string;
+  authorName: string;
+  body: string;
+  badge: "update" | "blocker" | "milestone" | "submission";
+  createdAt: string;
+}
+
+function mapGauntletHackathon(row: GauntletHackathonRow & {
+  updates_count?: number;
+  latest_body?: string | null;
+  latest_badge?: string | null;
+  latest_author?: string | null;
+  latest_created_at?: string | null;
+}): GauntletHackathon {
+  let teammates: Array<{ name: string; role: string; email?: string }> = [];
+  try {
+    teammates = JSON.parse(row.teammates_json ?? "[]");
+  } catch {
+    teammates = [];
+  }
+
+  let checklist: GauntletChecklistItem[] = [];
+  try {
+    checklist = JSON.parse(row.checklist_json ?? "[]");
+  } catch {
+    checklist = [];
+  }
+
+  let tags: string[] = [];
+  try {
+    tags = JSON.parse(row.tags_json ?? "[]");
+  } catch {
+    tags = [];
+  }
+
+  // Calculate readiness score from checklist or deliverables
+  let score = 0;
+  if (checklist.length > 0) {
+    const doneCount = checklist.filter((item) => item.done).length;
+    score = Math.round((doneCount / checklist.length) * 100);
+  } else {
+    if (row.name?.trim()) score += 15;
+    if (row.track?.trim() || row.organizer?.trim()) score += 15;
+    if (row.deck_url?.trim()) score += 20;
+    if (row.repo_url?.trim()) score += 20;
+    if (row.demo_url?.trim()) score += 20;
+    if (row.submission_url?.trim()) score += 10;
+  }
+
+  const latestUpdate = row.latest_body
+    ? {
+        id: "",
+        hackathonId: row.id,
+        userId: row.user_id,
+        authorName: row.latest_author ?? "Teammate",
+        body: row.latest_body,
+        badge: ((["update", "blocker", "milestone", "submission"].includes(row.latest_badge ?? "")
+          ? row.latest_badge
+          : "update") as "update" | "blocker" | "milestone" | "submission"),
+        createdAt: row.latest_created_at ?? row.updated_at,
+      }
+    : null;
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    workspaceId: row.workspace_id,
+    roomId: row.room_id,
+    name: row.name,
+    phase: ((["targeting", "ideation", "hacking", "demo", "won"].includes(row.phase)
+      ? row.phase
+      : "targeting") as "targeting" | "ideation" | "hacking" | "demo" | "won"),
+    targetDate: row.target_date,
+    submitDeadline: row.submit_deadline,
+    roundDate: row.round_date,
+    prizePool: row.prize_pool,
+    organizer: row.organizer,
+    registrar: row.registrar,
+    track: row.track,
+    link: row.link,
+    repoUrl: row.repo_url,
+    deckUrl: row.deck_url,
+    demoUrl: row.demo_url,
+    submissionUrl: row.submission_url,
+    registrantsCount: row.registrants_count ?? 0,
+    registrantsAsOf: row.registrants_as_of,
+    teammates,
+    checklist,
+    tags,
+    notes: row.notes,
+    results: row.results,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    updatesCount: row.updates_count ?? 0,
+    latestUpdate,
+    readinessScore: Math.min(100, Math.max(0, score)),
+  };
+}
+
+

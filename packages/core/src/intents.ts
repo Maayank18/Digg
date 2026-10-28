@@ -102,21 +102,30 @@ export const INTENTS: Record<IntentId, IntentDefinition> = {
 
   EVENT_LOOKUP: {
     id: "EVENT_LOOKUP",
-    description: "Upcoming or recent events with organizer, place, and date.",
+    description: "Hackathons, tech conferences, and summits with dates, prize pool, place, and registration links.",
     primaryField: "event_name",
     identityFields: ["event_name"],
-    protectedFields: ["start_date", "organizer"],
+    protectedFields: ["dates", "location", "prize_pool"],
     requiredFields: ["event_name", "source_url"],
-    optionalFields: ["organizer", "location", "start_date", "website"],
-    fields: ["event_name", "organizer", "location", "start_date", "website", "source_url"],
-    supportedSources: ["search", "event_pages", "rss"],
+    optionalFields: ["organizer", "dates", "location", "prize_pool", "website", "description", "last_verified"],
+    fields: ["event_name", "organizer", "dates", "location", "prize_pool", "website", "description", "last_verified", "source_url"],
+    supportedSources: ["search", "event_pages", "devfolio", "unstop", "hackerearth", "luma"],
     rankingStrategy: "freshness",
     collectionStrategy: "event_pages",
     keywords: [
-      { phrase: "events", weight: 5 },
+      { phrase: "hackathons", weight: 10 },
+      { phrase: "hackathon", weight: 10 },
+      { phrase: "hackfest", weight: 8 },
+      { phrase: "datathon", weight: 8 },
+      { phrase: "codeathon", weight: 8 },
+      { phrase: "devfest", weight: 7 },
+      { phrase: "events", weight: 6 },
       { phrase: "conferences", weight: 6 },
       { phrase: "conference", weight: 5 },
+      { phrase: "tech summit", weight: 6 },
       { phrase: "summit", weight: 4 },
+      { phrase: "meetup", weight: 5 },
+      { phrase: "meetups", weight: 5 },
     ],
   },
   COMPANY_LOOKUP: {
@@ -259,14 +268,48 @@ export const INTENTS: Record<IntentId, IntentDefinition> = {
       { phrase: "mentor", weight: 7 },
       { phrase: "panelists", weight: 6 },
       { phrase: "panelist", weight: 6 },
-      { phrase: "experts", weight: 5 },
-      { phrase: "expert", weight: 4 },
-      { phrase: "researchers", weight: 5 },
-      { phrase: "researcher", weight: 4 },
-      { phrase: "professors", weight: 5 },
-      { phrase: "professor", weight: 4 },
+      { phrase: "experts", weight: 6 },
+      { phrase: "expert", weight: 5 },
+      { phrase: "researchers", weight: 8 },
+      { phrase: "researcher", weight: 7 },
+      { phrase: "professors", weight: 7 },
+      { phrase: "professor", weight: 6 },
+      { phrase: "scientists", weight: 7 },
+      { phrase: "scientist", weight: 6 },
+      { phrase: "scholars", weight: 7 },
+      { phrase: "scholar", weight: 6 },
       { phrase: "evaluators", weight: 5 },
       { phrase: "evaluator", weight: 5 },
+    ],
+  },
+  PAPER_LOOKUP: {
+    id: "PAPER_LOOKUP",
+    description: "Published research papers, preprints and academic studies with authors, venue, and downloadable links.",
+    primaryField: "paper_title",
+    identityFields: ["paper_title"],
+    protectedFields: ["authors", "venue", "year"],
+    requiredFields: ["paper_title", "source_url"],
+    optionalFields: ["authors", "venue", "year", "topic", "pdf_url", "citations", "website", "last_verified"],
+    fields: ["paper_title", "authors", "venue", "year", "topic", "pdf_url", "citations", "website", "last_verified", "source_url"],
+    supportedSources: ["search", "arxiv", "scholar", "openreview", "paperswithcode"],
+    rankingStrategy: "freshness",
+    collectionStrategy: "paper_repositories",
+    keywords: [
+      { phrase: "research papers", weight: 10 },
+      { phrase: "research paper", weight: 10 },
+      { phrase: "papers", weight: 7 },
+      { phrase: "paper", weight: 6 },
+      { phrase: "arxiv", weight: 9 },
+      { phrase: "preprints", weight: 8 },
+      { phrase: "preprint", weight: 8 },
+      { phrase: "academic papers", weight: 9 },
+      { phrase: "academic paper", weight: 9 },
+      { phrase: "scientific papers", weight: 9 },
+      { phrase: "conference proceedings", weight: 8 },
+      { phrase: "journal paper", weight: 8 },
+      { phrase: "publications", weight: 6 },
+      { phrase: "publication", weight: 5 },
+      { phrase: "literature review", weight: 7 },
     ],
   },
 };
@@ -291,7 +334,9 @@ export function matchIntent(query: string): IntentMatch {
       if (pattern.test(text)) score += keyword.weight;
     }
     if (intent.id === "EVENT_LOOKUP" && /\b(sponsor|sponsors|sponsoring|judge|judges|mentor|mentors|speaker|speakers|keynote)\b/i.test(text)) score -= 6;
-    if (intent.id === "MARKET_LOOKUP" && /\b(competitor|sponsor|judge|mentor|speaker|lead|job)\b/i.test(text)) score -= 4;
+    if (intent.id === "SPONSOR_LOOKUP" && /\b(find hackathons?|upcoming hackathons?|hackathons in|hackathons with)\b/i.test(text) && !/\bsponsor/i.test(text)) score -= 8;
+    if (intent.id === "JUDGE_LOOKUP" && /\b(paper|papers|arxiv|preprints?|proceedings|journal)\b/i.test(text)) score -= 8;
+    if (intent.id === "MARKET_LOOKUP" && /\b(competitor|sponsor|judge|mentor|speaker|lead|job|hackathon|paper)\b/i.test(text)) score -= 4;
     if (intent.id === "PRODUCT_LOOKUP" && /\bvendor/.test(text)) score -= 3;
     return { intent: intent.id, score };
   });

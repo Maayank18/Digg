@@ -428,6 +428,7 @@ function label(record: { fields: Record<string, string> }): string {
   const f = record.fields;
   if (f.person_name) return f.person_name;
   if (f.role_title) return f.company_name ? `${f.role_title} — ${f.company_name}` : f.role_title;
+  if (f.paper_title) return f.paper_title;
   return f.company_name || f.event_name || f.program_name || f.product_name || f.segment || "Record";
 }
 

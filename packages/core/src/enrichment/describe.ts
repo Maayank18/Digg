@@ -11,10 +11,11 @@ export interface PageNote {
   text: string;
 }
 
-/** The column that says what a row is: what a company does, or a person's expertise. */
 export function describeFieldFor(intent: IntentId): string | null {
   if (intent === "LEAD_LOOKUP" || intent === "COMPETITOR_LOOKUP") return "category";
   if (intent === "JUDGE_LOOKUP") return "expertise";
+  if (intent === "EVENT_LOOKUP") return "description";
+  if (intent === "PAPER_LOOKUP") return "topic";
   return null;
 }
 

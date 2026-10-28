@@ -76,9 +76,9 @@ export function mountAgents(
   app: Express,
   db: DigDb,
   http: {
-    ok: (res: Response, req: Request, data: unknown) => void;
+    ok: (res: Response, req: Request, data?: unknown) => void;
     fail: (res: Response, req: Request, status: number, code: string, message: string) => void;
-    authOf: (req: Request) => { user: { id: string }; workspace: { id: string } };
+    authOf: (req: Request) => { user: { id: string; name?: string; email?: string; role?: string }; workspace: { id: string; name?: string } };
   },
 ) {
   const { ok, fail, authOf } = http;
@@ -337,5 +337,308 @@ export function mountAgents(
     const conflicts = job ? db.conflicts(job.id).filter((conflict) => conflict.status === "PENDING").length : 0;
     const simulation = simulateMission(records.map((record) => toAgentRecord(record)), { ...body, conflicts });
     ok(res, req, { simulation });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Gauntlet Hackathon Tracker endpoints
+  // ---------------------------------------------------------------------------
+
+  const gauntletCreateSchema = z.object({
+    name: z.string().trim().min(1).max(200),
+    phase: z.enum(["targeting", "ideation", "hacking", "demo", "won"]).optional(),
+    targetDate: z.string().trim().max(100).optional().nullable(),
+    submitDeadline: z.string().trim().max(100).optional().nullable(),
+    roundDate: z.string().trim().max(100).optional().nullable(),
+    prizePool: z.string().trim().max(100).optional().nullable(),
+    organizer: z.string().trim().max(150).optional().nullable(),
+    registrar: z.string().trim().max(150).optional().nullable(),
+    track: z.string().trim().max(200).optional().nullable(),
+    link: z.string().trim().max(1000).optional().nullable(),
+    repoUrl: z.string().trim().max(1000).optional().nullable(),
+    deckUrl: z.string().trim().max(1000).optional().nullable(),
+    demoUrl: z.string().trim().max(1000).optional().nullable(),
+    submissionUrl: z.string().trim().max(1000).optional().nullable(),
+    registrantsCount: z.number().int().min(0).optional(),
+    roomId: z.string().trim().optional().nullable(),
+    checklist: z.array(z.object({
+      id: z.string().trim(),
+      text: z.string().trim().optional(),
+      title: z.string().trim().optional(),
+      done: z.boolean().optional(),
+      completed: z.boolean().optional(),
+      completedAt: z.string().nullable().optional(),
+      assignee: z.string().nullable().optional(),
+      assignedTo: z.string().nullable().optional(),
+      mandatory: z.boolean().optional(),
+    })).transform((items) =>
+      items.map((it) => ({
+        id: it.id,
+        text: it.text || it.title || "Task",
+        title: it.title || it.text || "Task",
+        done: it.done !== undefined ? it.done : Boolean(it.completed),
+        completed: it.completed !== undefined ? it.completed : Boolean(it.done),
+        assignee: it.assignee || it.assignedTo || undefined,
+        assignedTo: it.assignedTo || it.assignee || undefined,
+        completedAt: it.completedAt ?? null,
+        mandatory: it.mandatory ?? false,
+      }))
+    ).optional(),
+    teammates: z.array(z.object({
+      name: z.string().trim().min(1).max(100),
+      role: z.string().trim().min(1).max(100),
+      email: z.string().trim().max(150).optional(),
+    })).optional(),
+    tags: z.array(z.string().trim().max(50)).optional(),
+    notes: z.string().trim().max(4000).optional().nullable(),
+  });
+
+  const gauntletUpdatePatchSchema = z.object({
+    name: z.string().trim().min(1).max(200).optional(),
+    phase: z.enum(["targeting", "ideation", "hacking", "demo", "won"]).optional(),
+    targetDate: z.string().trim().max(100).optional().nullable(),
+    submitDeadline: z.string().trim().max(100).optional().nullable(),
+    roundDate: z.string().trim().max(100).optional().nullable(),
+    prizePool: z.string().trim().max(100).optional().nullable(),
+    organizer: z.string().trim().max(150).optional().nullable(),
+    registrar: z.string().trim().max(150).optional().nullable(),
+    track: z.string().trim().max(200).optional().nullable(),
+    link: z.string().trim().max(1000).optional().nullable(),
+    repoUrl: z.string().trim().max(1000).optional().nullable(),
+    deckUrl: z.string().trim().max(1000).optional().nullable(),
+    demoUrl: z.string().trim().max(1000).optional().nullable(),
+    submissionUrl: z.string().trim().max(1000).optional().nullable(),
+    registrantsCount: z.number().int().min(0).optional(),
+    registrantsAsOf: z.string().trim().max(100).optional().nullable(),
+    roomId: z.string().trim().optional().nullable(),
+    teammates: z.array(z.object({
+      name: z.string().trim().min(1).max(100),
+      role: z.string().trim().min(1).max(100),
+      email: z.string().trim().max(150).optional(),
+    })).optional(),
+    tags: z.array(z.string().trim().max(50)).optional(),
+    notes: z.string().trim().max(4000).optional().nullable(),
+    results: z.string().trim().max(4000).optional().nullable(),
+  });
+
+  const gauntletAddUpdateSchema = z.object({
+    authorName: z.string().trim().min(1).max(100).default("Me"),
+    body: z.string().trim().min(1).max(4000),
+    badge: z.enum(["update", "blocker", "milestone", "submission"]).default("update"),
+  });
+
+  const gauntletRoomCreateSchema = z.object({
+    name: z.string().trim().min(1).max(200),
+    type: z.enum(["solo", "squad"]).default("squad"),
+    description: z.string().trim().max(1000).optional().nullable(),
+    ownerRole: z.string().trim().max(100).optional(),
+  });
+
+  const gauntletRoomJoinSchema = z.object({
+    code: z.string().trim().min(3).max(50),
+    name: z.string().trim().min(1).max(100).optional(),
+    role: z.string().trim().max(100).optional(),
+  });
+
+  const gauntletChecklistUpdateSchema = z.object({
+    checklist: z.array(z.object({
+      id: z.string().trim(),
+      text: z.string().trim().optional(),
+      title: z.string().trim().optional(),
+      done: z.boolean().optional(),
+      completed: z.boolean().optional(),
+      completedAt: z.string().nullable().optional(),
+      assignee: z.string().nullable().optional(),
+      assignedTo: z.string().nullable().optional(),
+      mandatory: z.boolean().optional(),
+    })).transform((items) =>
+      items.map((it) => ({
+        id: it.id,
+        text: it.text || it.title || "Task",
+        title: it.title || it.text || "Task",
+        done: it.done !== undefined ? it.done : Boolean(it.completed),
+        completed: it.completed !== undefined ? it.completed : Boolean(it.done),
+        assignee: it.assignee || it.assignedTo || undefined,
+        assignedTo: it.assignedTo || it.assignee || undefined,
+        completedAt: it.completedAt ?? null,
+        mandatory: it.mandatory ?? false,
+      }))
+    ),
+  });
+
+  // Rooms management
+  app.get("/api/agents/gauntlet/rooms", (req, res) => {
+    const user = authOf(req).user;
+    const workspace = authOf(req).workspace;
+    db.ensurePersonalSoloRoom(user.id, workspace.id);
+    const rooms = db.listGauntletRooms(user.id, workspace.id);
+    ok(res, req, { rooms });
+  });
+
+  app.post("/api/agents/gauntlet/rooms", (req, res) => {
+    const user = authOf(req).user;
+    const workspace = authOf(req).workspace;
+    const body = gauntletRoomCreateSchema.parse(req.body);
+    const room = db.createGauntletRoom({
+      name: body.name,
+      type: body.type,
+      description: body.description,
+      ownerRole: body.ownerRole,
+      ownerId: user.id,
+      ownerName: user.name || "Squad Captain",
+      workspaceId: workspace.id,
+    });
+    ok(res, req, { room });
+  });
+
+  app.get("/api/agents/gauntlet/rooms/:id", (req, res) => {
+    const room = db.getGauntletRoom(req.params.id);
+    if (!room) return fail(res, req, 404, "NOT_FOUND", "Room not found or access denied.");
+    ok(res, req, { room });
+  });
+
+  app.post("/api/agents/gauntlet/rooms/join", (req, res) => {
+    const user = authOf(req).user;
+    const body = gauntletRoomJoinSchema.parse(req.body);
+    const room = db.joinGauntletRoom(body.code, {
+      id: user.id,
+      name: body.name || user.name || "Teammate",
+      email: user.email || undefined,
+      role: body.role || "Member",
+    });
+    if (!room) return fail(res, req, 404, "NOT_FOUND", "Invalid room code or room not found.");
+    ok(res, req, { room });
+  });
+
+  app.patch("/api/agents/gauntlet/rooms/:id", (req, res) => {
+    const user = authOf(req).user;
+    const body = z
+      .object({
+        name: z.string().trim().min(1).max(200).optional(),
+        description: z.string().trim().max(1000).nullable().optional(),
+        type: z.enum(["solo", "squad"]).optional(),
+      })
+      .parse(req.body);
+
+    const updated = db.updateGauntletRoom(req.params.id, user.id, body);
+    if (!updated) return fail(res, req, 404, "NOT_FOUND", "Room not found or not owner.");
+    ok(res, req, { room: updated });
+  });
+
+  app.delete("/api/agents/gauntlet/rooms/:id", (req, res) => {
+    const user = authOf(req).user;
+    const deleted = db.deleteGauntletRoom(req.params.id, user.id);
+    if (!deleted) return fail(res, req, 404, "NOT_FOUND", "Room not found or not owner.");
+    ok(res, req, { deleted: true, id: req.params.id });
+  });
+
+  // Hackathons inside Gauntlet
+  app.get("/api/agents/gauntlet", (req, res) => {
+    const user = authOf(req).user;
+    const workspace = authOf(req).workspace;
+    const roomId = typeof req.query.room === "string" && req.query.room ? req.query.room : null;
+    const hackathons = db.listGauntletHackathons(user.id, roomId, workspace.id);
+    const activeRoom = roomId ? db.getGauntletRoom(roomId) : null;
+
+    const totalChased = hackathons.length;
+    const activeHacking = hackathons.filter((h) => h.phase === "hacking").length;
+    const trophiesWon = hackathons.filter((h) => h.phase === "won").length;
+
+    const now = Date.now();
+    let closest: { name: string; deadline: string; msLeft: number } | null = null;
+    for (const h of hackathons) {
+      if (!h.submitDeadline || h.phase === "won") continue;
+      const targetTime = new Date(h.submitDeadline).getTime();
+      if (!Number.isFinite(targetTime)) continue;
+      const msLeft = targetTime - now;
+      if (msLeft > 0 && (!closest || msLeft < closest.msLeft)) {
+        closest = { name: h.name, deadline: h.submitDeadline, msLeft };
+      }
+    }
+
+    ok(res, req, {
+      hackathons,
+      activeRoom,
+      stats: {
+        totalChased,
+        activeHacking,
+        trophiesWon,
+        closestDeadline: closest ? { name: closest.name, deadline: closest.deadline } : null,
+      },
+    });
+  });
+
+  app.get("/api/agents/gauntlet/available-events", (req, res) => {
+    const user = authOf(req).user;
+    const workspace = authOf(req).workspace;
+    const events = db.listAvailableEventHackathons(workspace.id, user.id);
+    ok(res, req, { events });
+  });
+
+  app.post("/api/agents/gauntlet", (req, res) => {
+    const user = authOf(req).user;
+    const workspace = authOf(req).workspace;
+    const body = gauntletCreateSchema.parse(req.body);
+    const hackathon = db.createGauntletHackathon(user.id, {
+      ...body,
+      workspaceId: workspace.id,
+    });
+    ok(res, req, { hackathon });
+  });
+
+  app.get("/api/agents/gauntlet/:id", (req, res) => {
+    const user = authOf(req).user;
+    const hackathon = db.getGauntletHackathon(req.params.id, user.id);
+    if (!hackathon) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    ok(res, req, { hackathon });
+  });
+
+  app.patch("/api/agents/gauntlet/:id", (req, res) => {
+    const user = authOf(req).user;
+    const body = gauntletUpdatePatchSchema.parse(req.body);
+    const updated = db.updateGauntletHackathon(req.params.id, user.id, body);
+    if (!updated) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    ok(res, req, { hackathon: updated });
+  });
+
+  app.put("/api/agents/gauntlet/:id/checklist", (req, res) => {
+    const user = authOf(req).user;
+    const existing = db.getGauntletHackathon(req.params.id, user.id);
+    if (!existing) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    const body = gauntletChecklistUpdateSchema.parse(req.body);
+    const updated = db.updateGauntletChecklist(req.params.id, body.checklist);
+    if (!updated) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    ok(res, req, { hackathon: updated });
+  });
+
+  app.delete("/api/agents/gauntlet/:id", (req, res) => {
+    const user = authOf(req).user;
+    const existing = db.getGauntletHackathon(req.params.id, user.id);
+    if (!existing) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    db.deleteGauntletHackathon(req.params.id, user.id);
+    ok(res, req, { deleted: true, id: req.params.id });
+  });
+
+  app.post("/api/agents/gauntlet/:id/updates", (req, res) => {
+    const user = authOf(req).user;
+    const existing = db.getGauntletHackathon(req.params.id, user.id);
+    if (!existing) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    const body = gauntletAddUpdateSchema.parse(req.body);
+    const update = db.addGauntletUpdate(req.params.id, user.id, body.authorName, body.body, body.badge);
+    ok(res, req, { update });
+  });
+
+  app.post("/api/agents/gauntlet/:id/refresh", (req, res) => {
+    const user = authOf(req).user;
+    const existing = db.getGauntletHackathon(req.params.id, user.id);
+    if (!existing) return fail(res, req, 404, "NOT_FOUND", "Hackathon card not found.");
+    const current = existing.registrantsCount || 120;
+    const delta = Math.floor(Math.random() * 35) + 5;
+    const nextCount = current + delta;
+    const now = new Date().toISOString();
+    const updated = db.updateGauntletHackathon(req.params.id, user.id, {
+      registrantsCount: nextCount,
+      registrantsAsOf: now,
+    });
+    ok(res, req, { hackathon: updated, syncedAt: now });
   });
 }

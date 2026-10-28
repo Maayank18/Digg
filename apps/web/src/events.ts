@@ -13,10 +13,12 @@ export type { FolderKey };
 
 export const FOLDERS: Array<{ key: FolderKey; label: string; noun: string; example: string; aliases: string[] }> = [
   { key: "sponsors", label: "Sponsors", noun: "sponsor", example: "Find sponsors for hackathons in India", aliases: ["sponsors", "sponsor", "partners", "sponsorship"] },
-  { key: "judges", label: "Judges & Mentors", noun: "judge, mentor or speaker", example: "AI researchers and keynote speakers for our hackathon in Delhi", aliases: ["judges", "judge", "mentors", "mentor", "speakers", "speaker", "keynote", "jury", "experts"] },
+  { key: "judges", label: "Judges & Mentors", noun: "judge, mentor or speaker", example: "AI researchers and keynote speakers for our hackathon in Delhi", aliases: ["judges", "judge", "mentors", "mentor", "speakers", "speaker", "keynote", "jury", "experts", "researchers"] },
   { key: "jobs", label: "Jobs", noun: "job", example: "Frontend internships in Bangalore", aliases: ["jobs", "job", "internships", "internship", "roles", "hiring"] },
   { key: "leads", label: "Leads", noun: "lead", example: "D2C skincare brands in Mumbai we could pitch our analytics tool to", aliases: ["leads", "lead", "prospects", "clients", "sales"] },
   { key: "competitors", label: "Competitors", noun: "competitor", example: "What are the alternatives to Notion?", aliases: ["competitors", "competitor", "alternatives", "rivals"] },
+  { key: "events", label: "Hackathons & Events", noun: "hackathon", example: "Upcoming AI hackathons in Delhi NCR with cash prizes", aliases: ["events", "event", "hackathons", "hackathon", "hackfest", "datathon", "competitions"] },
+  { key: "papers", label: "Research Papers", noun: "research paper", example: "Research papers on diffusion models and generative video architectures", aliases: ["papers", "paper", "research", "studies", "preprints", "arxiv"] },
 ];
 
 export interface DigEvent {
